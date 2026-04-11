@@ -11,6 +11,7 @@ Or via the installed console script::
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -25,12 +26,16 @@ from flipr.io.tidy_csv import (
     load_tidy,
     match_tidy_to_session,
 )
+from flipr.preprocess.filters import FILTER_MODES, filtered_session
 from flipr.preprocess.lifetime import DoubleExpFit, fit_double_exp
+from flipr.preprocess.motion import QCResult, compute_qc
 from flipr.preprocess.phasor import phasor_from_histogram, phasor_series_from_tcspc
 from flipr.viz.peth import peth_figure
 from flipr.viz.phasor import phasor_plot_figure
 from flipr.viz.tcspc import fit_params_table, tcspc_decay_figure
 from flipr.viz.traces import session_traces_figure
+
+LOGO_PATH = Path(__file__).parent / "assets" / "FLIPRlogo.png"
 
 # -----------------------------------------------------------------------------
 # Config
@@ -85,12 +90,58 @@ def cached_phasor_series(
     return phasor_series_from_tcspc(tcspc, bins, period_ns=period_ns)
 
 
+@st.cache_data(show_spinner="Computing QC metrics…")
+def cached_qc(
+    session_path: str,
+    filter_mode: str,
+    window_s: float,
+    polyorder: int,
+    motion_window_s: float,
+    motion_corr_threshold: float,
+) -> QCResult:
+    session = cached_load_session(session_path)
+    filt = filtered_session(
+        session, mode=filter_mode, window_s=window_s, polyorder=polyorder  # type: ignore[arg-type]
+    )
+    return compute_qc(
+        filt,
+        motion_window_s=motion_window_s,
+        motion_corr_threshold=motion_corr_threshold,
+    )
+
+
 # -----------------------------------------------------------------------------
 # Sidebar: data root + session picker
 # -----------------------------------------------------------------------------
-def sidebar() -> tuple[Path | None, SessionData | None, TidyData | None]:
-    st.sidebar.title("FLIPR analysis")
+@dataclass
+class SidebarState:
+    """Everything the sidebar exposes to the tabs."""
+
+    data_root: Path | None
+    session_raw: SessionData | None
+    session: SessionData | None  # == session_raw if filter_mode == "none"
+    session_path: Path | None
+    tidy: TidyData | None
+    filter_mode: str
+    filter_window_s: float
+    filter_polyorder: int
+    qc_motion_window_s: float
+    qc_motion_corr_threshold: float
+
+
+def sidebar() -> SidebarState:
+    if LOGO_PATH.is_file():
+        st.sidebar.image(str(LOGO_PATH), use_container_width=True)
+    else:
+        st.sidebar.title("FLIPR analysis")
     st.sidebar.caption("v0.0.1")
+
+    empty_state = SidebarState(
+        data_root=None, session_raw=None, session=None, session_path=None,
+        tidy=None, filter_mode="none", filter_window_s=0.25,
+        filter_polyorder=2, qc_motion_window_s=1.0,
+        qc_motion_corr_threshold=0.85,
+    )
 
     default = str(DEFAULT_DATA_ROOT) if DEFAULT_DATA_ROOT.is_dir() else ""
     data_root_str = st.sidebar.text_input(
@@ -100,33 +151,33 @@ def sidebar() -> tuple[Path | None, SessionData | None, TidyData | None]:
     )
     if not data_root_str:
         st.sidebar.warning("Enter a FLIPR data root to begin.")
-        return None, None, None
+        return empty_state
     data_root = Path(data_root_str).expanduser()
     if not data_root.is_dir():
         st.sidebar.error(f"Not a directory: {data_root}")
-        return None, None, None
+        return empty_state
 
     sessions = list_sessions(data_root)
     if not sessions:
         st.sidebar.warning(f"No sessions/ folder found under {data_root}.")
-        return data_root, None, None
+        return replace(empty_state, data_root=data_root)
 
     session_names = [p.name for p in sessions]
     picked_name = st.sidebar.selectbox("Session", session_names, index=len(sessions) - 1)
     picked_path = next(p for p in sessions if p.name == picked_name)
 
     try:
-        session = cached_load_session(str(picked_path))
+        session_raw = cached_load_session(str(picked_path))
     except Exception as exc:  # noqa: BLE001
         st.sidebar.error(f"Failed to load session: {exc}")
-        return data_root, None, None
+        return replace(empty_state, data_root=data_root)
 
-    # Match to tidy file for TCSPC data (for the interval inspector)
+    # Match to tidy file for TCSPC data (for the interval inspector + phasor)
     tidy_files = list_tidy_files(data_root)
-    matched = match_tidy_to_session(tidy_files, session.blockname)
+    matched = match_tidy_to_session(tidy_files, session_raw.blockname)
     tidy: TidyData | None = None
     if matched is None:
-        st.sidebar.warning("No matching tidy/ file for this session — the Interval Inspector will be disabled.")
+        st.sidebar.warning("No matching tidy/ file — Interval Inspector and Phasor will be disabled.")
     else:
         st.sidebar.caption(f"Tidy file: `{matched.name}`")
         try:
@@ -134,31 +185,112 @@ def sidebar() -> tuple[Path | None, SessionData | None, TidyData | None]:
         except Exception as exc:  # noqa: BLE001
             st.sidebar.error(f"Failed to load tidy file: {exc}")
 
+    # --- Filter controls (global) ---
+    st.sidebar.divider()
+    st.sidebar.markdown("**Stream filter**")
+    st.sidebar.caption(
+        "Smoothing applied to intensity + lifetime. Propagates to the session "
+        "overview and PETH tabs. Interval inspector and phasor re-compute from "
+        "the raw TCSPC histograms and are unaffected."
+    )
+    filter_mode = st.sidebar.selectbox(
+        "filter mode",
+        options=list(FILTER_MODES),
+        index=0,
+        key="filter_mode",
+    )
+    if filter_mode == "none":
+        window_s = 0.25
+        polyorder = 2
+    else:
+        window_s = st.sidebar.number_input(
+            "window (s)",
+            min_value=0.05, max_value=10.0, value=0.25, step=0.05,
+            key="filter_window",
+        )
+        if filter_mode == "savgol":
+            polyorder = int(
+                st.sidebar.number_input(
+                    "polyorder", min_value=1, max_value=5, value=2, step=1,
+                    key="filter_polyorder",
+                )
+            )
+        else:
+            polyorder = 2
+
+    session = filtered_session(
+        session_raw, mode=filter_mode,  # type: ignore[arg-type]
+        window_s=float(window_s), polyorder=int(polyorder),
+    )
+
+    # --- Motion QC controls ---
+    with st.sidebar.expander("QC / motion detection", expanded=False):
+        qc_motion_window_s = st.number_input(
+            "rolling window (s)", min_value=0.1, max_value=30.0,
+            value=1.0, step=0.1, key="qc_motion_window",
+        )
+        qc_motion_corr_threshold = st.slider(
+            "|corr| threshold", min_value=0.3, max_value=0.99,
+            value=0.85, step=0.01, key="qc_motion_threshold",
+            help="Flag samples whose rolling Pearson r(intensity, lifetime) "
+                 "exceeds this. Biosensor sessions can show modest natural "
+                 "correlation, so 0.85 is the default.",
+        )
+
     # Session metadata block
-    with st.sidebar.expander("Session metadata", expanded=True):
+    with st.sidebar.expander("Session metadata", expanded=False):
         st.write(
             {
-                "subject": session.subject,
-                "procedure": session.procedure,
-                "fs (Hz)": session.fs,
-                "blockname": session.blockname,
-                "duration (s)": float(session.streams["time"].max()),
-                "n samples": int(len(session.streams)),
-                "event types": session.event_types,
+                "subject": session_raw.subject,
+                "procedure": session_raw.procedure,
+                "fs (Hz)": session_raw.fs,
+                "blockname": session_raw.blockname,
+                "duration (s)": float(session_raw.streams["time"].max()),
+                "n samples": int(len(session_raw.streams)),
+                "event types": session_raw.event_types,
             }
         )
-        note = session.meta.get("note_general", "")
+        note = session_raw.meta.get("note_general", "")
         if note and note != "NA":
             st.caption(f"Note: {note}")
 
-    return data_root, session, tidy
+    return SidebarState(
+        data_root=data_root,
+        session_raw=session_raw,
+        session=session,
+        session_path=picked_path,
+        tidy=tidy,
+        filter_mode=str(filter_mode),
+        filter_window_s=float(window_s),
+        filter_polyorder=int(polyorder),
+        qc_motion_window_s=float(qc_motion_window_s),
+        qc_motion_corr_threshold=float(qc_motion_corr_threshold),
+    )
 
 
 # -----------------------------------------------------------------------------
 # Tab 1: Session overview
 # -----------------------------------------------------------------------------
-def render_overview(session: SessionData, highlight_range: tuple[float, float] | None = None) -> None:
-    st.subheader("Session overview")
+def render_overview(
+    session: SessionData,
+    *,
+    qc: QCResult | None = None,
+    filter_label: str = "raw",
+    highlight_range: tuple[float, float] | None = None,
+) -> None:
+    # Logo banner at the top of the first page
+    if LOGO_PATH.is_file():
+        col_logo, col_title = st.columns([1, 4])
+        with col_logo:
+            st.image(str(LOGO_PATH), width=140)
+        with col_title:
+            st.subheader("Session overview")
+            st.caption(
+                f"Subject **{session.subject}** · procedure **{session.procedure}** · "
+                f"filter: *{filter_label}*"
+            )
+    else:
+        st.subheader("Session overview")
 
     col1, col2, col3 = st.columns([1, 1, 2])
     with col1:
@@ -194,6 +326,54 @@ def render_overview(session: SessionData, highlight_range: tuple[float, float] |
     mc2.metric("intensity CV", f"{streams['intensity'].std() / max(streams['intensity'].mean(), 1):.3f}")
     mc3.metric("mean τ (ns)", f"{streams['lifetime'].mean():.3f}")
     mc4.metric("τ std (ns)", f"{streams['lifetime'].std():.3f}")
+
+    # Motion / QC panel
+    if qc is not None:
+        st.divider()
+        st.markdown("**QC · motion diagnostics**")
+        summary = qc.summary()
+        qc_cols = st.columns(5)
+        qc_cols[0].metric("flagged (any)", f"{summary['any']*100:.2f}%")
+        qc_cols[1].metric("low photons", f"{summary['intensity']*100:.2f}%")
+        qc_cols[2].metric("motion (|r|)", f"{summary['motion']*100:.2f}%")
+        qc_cols[3].metric("intensity jumps", f"{summary['jump']*100:.2f}%")
+        qc_cols[4].metric("max |rolling r|", f"{summary['max_abs_corr']:.3f}")
+
+        import plotly.graph_objects as go
+
+        corr_fig = go.Figure()
+        corr_fig.add_trace(
+            go.Scattergl(
+                x=qc.time,
+                y=qc.rolling_corr,
+                mode="lines",
+                line=dict(color="#888", width=1),
+                name="rolling r(I, τ)",
+            )
+        )
+        # Shade flagged regions (subsample for speed)
+        flag = qc.any_flag
+        if flag.any():
+            corr_fig.add_trace(
+                go.Scattergl(
+                    x=qc.time[flag],
+                    y=qc.rolling_corr[flag],
+                    mode="markers",
+                    marker=dict(size=4, color="#d62728"),
+                    name="flagged",
+                )
+            )
+        corr_fig.add_hline(y=0, line_dash="dot", line_color="#bbb", line_width=1)
+        corr_fig.update_layout(
+            height=220,
+            margin=dict(l=60, r=20, t=10, b=40),
+            xaxis_title="time (s)",
+            yaxis_title="rolling r",
+            yaxis_range=[-1, 1],
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1),
+        )
+        st.plotly_chart(corr_fig, use_container_width=True)
 
     # Per-event count summary
     with st.expander("event counts"):
@@ -408,12 +588,13 @@ def render_phasor(
 # -----------------------------------------------------------------------------
 # Tab 4: Event-aligned PETH
 # -----------------------------------------------------------------------------
-def render_peth(session: SessionData) -> None:
+def render_peth(session: SessionData, *, filter_label: str = "raw") -> None:
     st.subheader("Event-aligned PETH")
     st.caption(
         "Per-trial matrix + mean ± SEM trace for any continuous signal "
-        "around any event type. Rebuilt from the raw streams + event list, "
-        "so you can pick arbitrary windows and normalisation modes."
+        "around any event type. Rebuilt from the session streams + event "
+        "list, so you can pick arbitrary windows and normalisation modes. "
+        f"**Signal source: {filter_label}** (change via sidebar filter)."
     )
 
     event_types = session.peth_event_types() or session.event_types
@@ -525,25 +706,46 @@ def render_peth(session: SessionData) -> None:
 # Main
 # -----------------------------------------------------------------------------
 def main() -> None:
-    data_root, session, tidy = sidebar()
-    if session is None:
+    state = sidebar()
+    if state.session is None or state.session_raw is None:
         st.info("Pick a FLIPR data root and session in the sidebar to begin.")
         return
 
-    st.title(f"{session.subject} · {session.blockname}")
+    session = state.session  # filtered (or raw if filter_mode == 'none')
+    session_raw = state.session_raw
+    tidy = state.tidy
 
-    # Seed the interval_range session state the first time the session loads,
-    # so both the overview (for its shaded highlight) and the interval
-    # inspector's slider start from the same default and stay in sync.
-    t_end = float(session.streams["time"].max())
+    st.title(f"{session_raw.subject} · {session_raw.blockname}")
+
+    # Seed the interval_range session state the first time the session loads.
+    t_end = float(session_raw.streams["time"].max())
     default_range = (0.0, min(30.0, t_end))
     if "interval_range" not in st.session_state:
         st.session_state["interval_range"] = default_range
-    # Reset if we've switched sessions (different blockname → previous range
-    # may exceed the new session length)
-    if st.session_state.get("_range_session") != session.blockname:
+    if st.session_state.get("_range_session") != session_raw.blockname:
         st.session_state["interval_range"] = default_range
-        st.session_state["_range_session"] = session.blockname
+        st.session_state["_range_session"] = session_raw.blockname
+
+    # QC is computed from the filtered session (user choice propagates)
+    try:
+        qc = cached_qc(
+            str(state.session_path),
+            state.filter_mode,
+            state.filter_window_s,
+            state.filter_polyorder,
+            state.qc_motion_window_s,
+            state.qc_motion_corr_threshold,
+        )
+    except Exception as exc:  # noqa: BLE001
+        st.sidebar.error(f"QC computation failed: {exc}")
+        qc = None
+
+    filter_label = (
+        "raw"
+        if state.filter_mode == "none"
+        else f"{state.filter_mode} · {state.filter_window_s:.2f}s"
+        + (f" · order {state.filter_polyorder}" if state.filter_mode == "savgol" else "")
+    )
 
     tab_overview, tab_interval, tab_phasor, tab_peth = st.tabs(
         [
@@ -555,7 +757,12 @@ def main() -> None:
     )
 
     with tab_overview:
-        render_overview(session, highlight_range=st.session_state["interval_range"])
+        render_overview(
+            session,
+            qc=qc,
+            filter_label=filter_label,
+            highlight_range=st.session_state["interval_range"],
+        )
 
     with tab_interval:
         if tidy is None:
@@ -564,7 +771,9 @@ def main() -> None:
                 "this session (for per-frame TCSPC histograms)."
             )
         else:
-            render_interval(session, tidy)
+            # Interval inspector uses raw session (stream filter is irrelevant;
+            # it re-fits TCSPC histograms directly).
+            render_interval(session_raw, tidy)
 
     with tab_phasor:
         if tidy is None:
@@ -573,10 +782,11 @@ def main() -> None:
                 "this session (for per-frame TCSPC histograms)."
             )
         else:
-            render_phasor(session, tidy, interval_range=st.session_state["interval_range"])
+            render_phasor(session_raw, tidy, interval_range=st.session_state["interval_range"])
 
     with tab_peth:
-        render_peth(session)
+        # PETH uses the FILTERED session so smoothing propagates
+        render_peth(session, filter_label=filter_label)
 
 
 if __name__ == "__main__":
