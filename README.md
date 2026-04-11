@@ -7,7 +7,7 @@
 <p align="center">
   Visualization and preprocessing tools for <b>Fluorescence Lifetime Fiber Photometry (FLIPR)</b> —
   an interactive Streamlit dashboard, a library of reusable analysis modules,
-  and a byte-exact reader for the lab's proprietary raw acquisition format.
+  and a byte-exact reader for the Mao/Zhong Lab raw acquisition format.
 </p>
 
 ---
@@ -16,9 +16,8 @@
 
 FLIPR records dopamine (and other) biosensor dynamics with a fiber-coupled TCSPC
 rig, producing not just intensity traces but a full photon-arrival-time
-histogram per frame at ~20 Hz. Because fluorescence lifetime is ratiometric
-— independent of total photon count, excitation power, or fiber-coupling
-efficiency — it provides a direct quantitative readout of sensor state
+histogram per frame at ~20 Hz. Because fluorescence lifetime is independent of total photon count, excitation power, or fiber-coupling
+efficiency, it provides a direct quantitative readout of sensor state
 that intensity alone cannot. This package turns that data into a tool
 researchers can actually drive: preprocess, inspect, event-align, and
 phasor-analyse sessions from a single Streamlit app, with all of the
@@ -26,7 +25,7 @@ underlying analysis exposed as a clean Python library for scripted work.
 
 This project targets data acquired on a **TimeHarp 260 P** board driven by
 the lab's MATLAB acquisition software, with the **FLIM-DA0.5** dopamine
-biosensor on the biology side. Nothing in the pipeline is hardcoded to
+biosensor (developed by Yulong Li) on the biology side. Nothing in the pipeline is hardcoded to
 those specific devices or sensors — any 80 MHz rep-rate TCSPC photometry
 setup with a 126-bin × 0.1 ns histogram at 20 Hz will work out of the
 box. Different rig geometries just need a different period / bin axis.
