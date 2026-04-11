@@ -25,6 +25,8 @@ from flipr.io.tidy_csv import (
     match_tidy_to_session,
 )
 from flipr.preprocess.lifetime import DoubleExpFit, fit_double_exp
+from flipr.preprocess.phasor import phasor_from_histogram, phasor_series_from_tcspc
+from flipr.viz.phasor import phasor_plot_figure
 from flipr.viz.tcspc import fit_params_table, tcspc_decay_figure
 from flipr.viz.traces import session_traces_figure
 
@@ -70,6 +72,15 @@ def cached_fit(
         fit_start_ns=fit_start,
         fit_stop_ns=fit_stop,
     )
+
+
+@st.cache_data(show_spinner="Computing phasor trajectory…")
+def cached_phasor_series(
+    tcspc: np.ndarray,
+    bins: np.ndarray,
+    period_ns: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    return phasor_series_from_tcspc(tcspc, bins, period_ns=period_ns)
 
 
 # -----------------------------------------------------------------------------
@@ -276,6 +287,123 @@ def render_interval(session: SessionData, tidy: TidyData) -> None:
 
 
 # -----------------------------------------------------------------------------
+# Tab 3: Phasor explorer
+# -----------------------------------------------------------------------------
+def render_phasor(
+    session: SessionData,
+    tidy: TidyData,
+    interval_range: tuple[float, float] | None = None,
+) -> None:
+    st.subheader("Phasor explorer")
+    st.caption(
+        "Each frame's TCSPC histogram is mapped to a point in phasor space "
+        "``(G, S)`` at the laser fundamental (80 MHz). Single-exponential "
+        "decays sit on the universal semicircle; mixtures land inside it. "
+        "Cloud drift across the session highlights sensor state changes "
+        "without any fitting."
+    )
+    st.info(
+        "**Note:** points are **uncalibrated** — the instrument IRF rotates "
+        "the entire cloud by a fixed angle, so the raw coordinates may sit "
+        "slightly above or below the semicircle. Relative drift and cloud "
+        "shape are still meaningful. A reference-dye calibration step is a "
+        "planned v2 addition.",
+        icon="ℹ️",
+    )
+
+    # Compute period from the bin axis (last bin + bin_step); in practice 12.5 ns
+    bin_step = float(tidy.tcspc_bins_ns[1] - tidy.tcspc_bins_ns[0])
+    period_ns = round(bin_step * (int(12.5 / bin_step)), 4)  # → 12.5 for 0.1 ns bins
+
+    col_a, col_b, col_c = st.columns([1.2, 1, 1])
+    with col_a:
+        color_mode = st.radio(
+            "point colour",
+            options=["time", "trial", "none"],
+            horizontal=True,
+            index=0,
+            help="Colour the phasor cloud by session time, trial index, or single colour.",
+        )
+    with col_b:
+        show_ref = st.toggle("show header τ reference points", value=True)
+    with col_c:
+        show_window = st.toggle("mark selected window", value=True, disabled=interval_range is None)
+
+    # Full-session phasor trajectory
+    real, imag, mean, freq = cached_phasor_series(
+        tidy.tcspc.astype(np.float64), tidy.tcspc_bins_ns, period_ns
+    )
+
+    # Colour array + hover
+    t_axis = tidy.streams["time"].to_numpy()
+    hover = [f"t={t:.2f}s" for t in t_axis]
+    if color_mode == "time":
+        color_arr = t_axis
+    elif color_mode == "trial":
+        # Assign each frame its trial number by forward-filling from
+        # solution_onset events
+        events = session.events
+        onsets = events[events["event_id_char"] == "solution_onset"]["time"].to_numpy()
+        if onsets.size == 0:
+            color_arr = None
+        else:
+            color_arr = np.searchsorted(onsets, t_axis, side="right").astype(np.float64)
+    else:
+        color_arr = None
+
+    reference_taus: list[float] | None = None
+    if show_ref:
+        try:
+            tau1 = float(tidy.params["header_state_tau1"])
+            tau2 = float(tidy.params["header_state_tau2"])
+            reference_taus = [tau1, tau2]
+        except (KeyError, ValueError):
+            reference_taus = None
+
+    highlight_point: tuple[float, float] | None = None
+    if show_window and interval_range is not None:
+        window_hist = tidy.integrate_histogram(*interval_range).astype(np.float64)
+        win = phasor_from_histogram(window_hist, tidy.tcspc_bins_ns, period_ns=period_ns)
+        if np.isfinite(win.real) and np.isfinite(win.imag):
+            highlight_point = (win.real, win.imag)
+
+    # Keep only finite points for plotting
+    finite = np.isfinite(real) & np.isfinite(imag)
+    real_plot = real[finite]
+    imag_plot = imag[finite]
+    hover_plot = [hover[i] for i in np.where(finite)[0]]
+    color_plot = color_arr[finite] if color_arr is not None else None
+
+    title = f"{freq:.1f} MHz · {finite.sum():,} frames"
+    fig = phasor_plot_figure(
+        real=real_plot,
+        imag=imag_plot,
+        point_color=color_plot,
+        point_label="session frames",
+        point_hover=np.array(hover_plot),
+        reference_taus=reference_taus,
+        highlight=highlight_point,
+        period_ns=period_ns,
+        title=title,
+        height=620,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Summary stats row
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("mean G", f"{np.nanmean(real):.4f}")
+    mc2.metric("mean S", f"{np.nanmean(imag):.4f}")
+    mc3.metric("G std", f"{np.nanstd(real):.4f}")
+    mc4.metric("S std", f"{np.nanstd(imag):.4f}")
+
+    if highlight_point is not None and interval_range is not None:
+        st.caption(
+            f"Selected window t ∈ [{interval_range[0]:.2f}, {interval_range[1]:.2f}] s → "
+            f"G = {highlight_point[0]:.4f}, S = {highlight_point[1]:.4f}"
+        )
+
+
+# -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
 def main() -> None:
@@ -299,7 +427,9 @@ def main() -> None:
         st.session_state["interval_range"] = default_range
         st.session_state["_range_session"] = session.blockname
 
-    tab_overview, tab_interval = st.tabs(["Session overview", "Interval inspector"])
+    tab_overview, tab_interval, tab_phasor = st.tabs(
+        ["Session overview", "Interval inspector", "Phasor explorer"]
+    )
 
     with tab_overview:
         render_overview(session, highlight_range=st.session_state["interval_range"])
@@ -312,6 +442,15 @@ def main() -> None:
             )
         else:
             render_interval(session, tidy)
+
+    with tab_phasor:
+        if tidy is None:
+            st.warning(
+                "Phasor explorer requires a tidy/\\*_data.csv file matching "
+                "this session (for per-frame TCSPC histograms)."
+            )
+        else:
+            render_phasor(session, tidy, interval_range=st.session_state["interval_range"])
 
 
 if __name__ == "__main__":

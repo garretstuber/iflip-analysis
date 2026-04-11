@@ -15,6 +15,8 @@ import pytest
 from flipr.io.session_csv import load_session
 from flipr.io.tidy_csv import list_tidy_files, load_tidy, match_tidy_to_session
 from flipr.preprocess.lifetime import fit_double_exp
+from flipr.preprocess.phasor import phasor_from_histogram, phasor_series_from_tcspc
+from flipr.viz.phasor import phasor_plot_figure
 from flipr.viz.tcspc import fit_params_table, tcspc_decay_figure
 from flipr.viz.traces import event_rate_histogram, session_traces_figure
 
@@ -77,3 +79,26 @@ def test_fit_params_table_has_expected_rows():
     params = {r["param"] for r in rows}
     assert "τ₁ (slow, ns)" in params
     assert "χ² reduced" in params
+
+
+def test_phasor_plot_figure_builds_empty():
+    fig = phasor_plot_figure()
+    assert isinstance(fig, go.Figure)
+    # at least the semicircle
+    assert len(fig.data) >= 1
+
+
+def test_phasor_plot_figure_with_cloud_and_references():
+    tidy = load_tidy(match_tidy_to_session(list_tidy_files(DATA_ROOT), EXAMPLE_BLOCK))
+    tcspc_sub = tidy.tcspc[:500].astype(np.float64)
+    real, imag, _, _ = phasor_series_from_tcspc(tcspc_sub, tidy.tcspc_bins_ns)
+    finite = np.isfinite(real) & np.isfinite(imag)
+    fig = phasor_plot_figure(
+        real=real[finite],
+        imag=imag[finite],
+        reference_taus=[3.8, 0.6],
+        highlight=(float(real[finite].mean()), float(imag[finite].mean())),
+    )
+    assert isinstance(fig, go.Figure)
+    # semicircle + cloud + reference markers + highlight = 4 traces
+    assert len(fig.data) >= 4
