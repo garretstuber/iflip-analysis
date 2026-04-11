@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from flipr.align.peth import build_peth
 from flipr.io.session_csv import SessionData, list_sessions, load_session
 from flipr.io.tidy_csv import (
     TidyData,
@@ -26,6 +27,7 @@ from flipr.io.tidy_csv import (
 )
 from flipr.preprocess.lifetime import DoubleExpFit, fit_double_exp
 from flipr.preprocess.phasor import phasor_from_histogram, phasor_series_from_tcspc
+from flipr.viz.peth import peth_figure
 from flipr.viz.phasor import phasor_plot_figure
 from flipr.viz.tcspc import fit_params_table, tcspc_decay_figure
 from flipr.viz.traces import session_traces_figure
@@ -404,6 +406,122 @@ def render_phasor(
 
 
 # -----------------------------------------------------------------------------
+# Tab 4: Event-aligned PETH
+# -----------------------------------------------------------------------------
+def render_peth(session: SessionData) -> None:
+    st.subheader("Event-aligned PETH")
+    st.caption(
+        "Per-trial matrix + mean ± SEM trace for any continuous signal "
+        "around any event type. Rebuilt from the raw streams + event list, "
+        "so you can pick arbitrary windows and normalisation modes."
+    )
+
+    event_types = session.peth_event_types() or session.event_types
+    if not event_types:
+        st.warning("this session has no events")
+        return
+
+    col_a, col_b, col_c = st.columns([1.2, 1, 1])
+    with col_a:
+        event_type = st.selectbox(
+            "event type",
+            options=event_types,
+            index=0,
+        )
+    with col_b:
+        signal = st.selectbox(
+            "signal",
+            options=["lifetime", "intensity"],
+            index=0,
+        )
+    with col_c:
+        norm_mode = st.selectbox(
+            "normalisation",
+            options=["raw", "baseline-corrected", "z-scored"],
+            index=1,
+            help="baseline-corrected = subtract pre-event baseline; "
+                 "z-scored = (x - baseline_mean) / baseline_std",
+        )
+
+    col_pre, col_post, col_bl_lo, col_bl_hi = st.columns(4)
+    with col_pre:
+        pre_window = st.number_input(
+            "pre (s)", min_value=-60.0, max_value=-0.1, value=-3.0, step=0.1
+        )
+    with col_post:
+        post_window = st.number_input(
+            "post (s)", min_value=0.1, max_value=60.0, value=5.0, step=0.1
+        )
+    with col_bl_lo:
+        bl_lo = st.number_input(
+            "baseline start (s)", min_value=-60.0, max_value=0.0,
+            value=max(float(pre_window), -2.5), step=0.1,
+            disabled=(norm_mode == "raw"),
+        )
+    with col_bl_hi:
+        bl_hi = st.number_input(
+            "baseline end (s)", min_value=-60.0, max_value=5.0,
+            value=-0.1, step=0.1,
+            disabled=(norm_mode == "raw"),
+        )
+
+    try:
+        peth = build_peth(
+            session,
+            event_type=event_type,
+            signal=signal,
+            pre_window=float(pre_window),
+            post_window=float(post_window),
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+
+    baseline_window = (float(bl_lo), float(bl_hi))
+    if norm_mode == "baseline-corrected":
+        try:
+            peth_display = peth.baseline_corrected(window=baseline_window)
+        except ValueError as exc:
+            st.error(f"baseline correction failed: {exc}")
+            return
+    elif norm_mode == "z-scored":
+        try:
+            peth_display = peth.zscored(window=baseline_window)
+        except ValueError as exc:
+            st.error(f"z-score failed: {exc}")
+            return
+    else:
+        peth_display = peth
+
+    fig = peth_figure(
+        peth_display,
+        title=f"{event_type} · {signal} · {norm_mode}",
+        height=620,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Summary metrics
+    mean = peth_display.mean()
+    peak_idx = int(np.nanargmax(np.abs(mean)))
+    peak_time = float(peth_display.time_rel[peak_idx])
+    peak_val = float(mean[peak_idx])
+
+    try:
+        auc = peth_display.trial_auc(window=(0.0, float(post_window)))
+        auc_mean = float(np.nanmean(auc))
+        auc_sem = float(np.nanstd(auc, ddof=1) / np.sqrt(len(auc)))
+    except ValueError:
+        auc_mean = float("nan")
+        auc_sem = float("nan")
+
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("n trials", f"{peth_display.n_trials}")
+    mc2.metric("peak |mean|", f"{peak_val:+.4f}")
+    mc3.metric("peak time (s)", f"{peak_time:+.2f}")
+    mc4.metric("post-event AUC ± SEM", f"{auc_mean:.3f} ± {auc_sem:.3f}")
+
+
+# -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
 def main() -> None:
@@ -427,8 +545,13 @@ def main() -> None:
         st.session_state["interval_range"] = default_range
         st.session_state["_range_session"] = session.blockname
 
-    tab_overview, tab_interval, tab_phasor = st.tabs(
-        ["Session overview", "Interval inspector", "Phasor explorer"]
+    tab_overview, tab_interval, tab_phasor, tab_peth = st.tabs(
+        [
+            "Session overview",
+            "Interval inspector",
+            "Phasor explorer",
+            "Event PETH",
+        ]
     )
 
     with tab_overview:
@@ -451,6 +574,9 @@ def main() -> None:
             )
         else:
             render_phasor(session, tidy, interval_range=st.session_state["interval_range"])
+
+    with tab_peth:
+        render_peth(session)
 
 
 if __name__ == "__main__":
