@@ -357,10 +357,11 @@ uv run python scripts/iflip2_diagnose.py
 ## Acknowledgements
 
 - **Yulong Li** — development of the FLIM-DA0.5 fluorescence lifetime
-  dopamine biosensor this project was built for.
+  dopamine biosensor.
 - **Tianyi Mao** and **Haining Zhong** — development of the FLIPR
   fiber photometry hardware and MATLAB acquisition software that
   produces the `.iFLiP2` files this package reads.
+- **Adam Gordon** and **Hallie Lazaro** — data collection.
 - [PhasorPy](https://www.phasorpy.org) — the phasor-analysis library
   this project wraps for its phasor tab.
 - TimeHarp 260 P (PicoQuant) — the TCSPC hardware the rig is built on.
