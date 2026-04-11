@@ -151,9 +151,7 @@ def test_lifetime_matches_csv(raw, tidy):
     # The MATLAB pipeline writes ~14 significant digits; our derivation is
     # all float64 too. A 1e-9 absolute tolerance + 1e-9 relative tolerance
     # is a tighter bound than the CSV's text precision.
-    np.testing.assert_allclose(
-        a, b, atol=1e-9, rtol=1e-9, err_msg="lifetime vector mismatch"
-    )
+    np.testing.assert_allclose(a, b, atol=1e-9, rtol=1e-9, err_msg="lifetime vector mismatch")
 
 
 # --------------------------------------------------------------------------- #

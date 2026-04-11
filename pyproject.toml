@@ -42,4 +42,7 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "NPY", "PD"]
-ignore = ["E501"]  # line-length handled by formatter
+ignore = [
+    "E501",   # line-length handled by formatter
+    "PD011",  # false positive on PETH dataclass's real `values` ndarray field
+]

@@ -74,8 +74,13 @@ def test_single_component_limit_integrates_to_alpha_tau():
 def test_noiseless_recovery_of_known_params():
     """With zero noise, the fit should recover the generating params to high precision."""
     true_params = dict(
-        alpha1=100.0, tau1=3.8, alpha2=800.0, tau2=0.6,
-        background=20.0, t0=1.012, sigma=0.21,
+        alpha1=100.0,
+        tau1=3.8,
+        alpha2=800.0,
+        tau2=0.6,
+        background=20.0,
+        t0=1.012,
+        sigma=0.21,
     )
     hist = _synthetic_histogram(**true_params, total_photons=5e5)
     fit = fit_double_exp(hist, BIN_NS)
@@ -93,8 +98,13 @@ def test_poisson_noise_recovery():
     """With realistic Poisson noise, recovery is ~5%."""
     rng = np.random.default_rng(seed=42)
     true_params = dict(
-        alpha1=100.0, tau1=3.8, alpha2=800.0, tau2=0.6,
-        background=5.0, t0=1.012, sigma=0.21,
+        alpha1=100.0,
+        tau1=3.8,
+        alpha2=800.0,
+        tau2=0.6,
+        background=5.0,
+        t0=1.012,
+        sigma=0.21,
     )
     hist = _synthetic_histogram(**true_params, total_photons=2e5, rng=rng)
     fit = fit_double_exp(hist, BIN_NS)
@@ -110,8 +120,15 @@ def test_canonical_tau_ordering():
     rng = np.random.default_rng(seed=7)
     # Generator labels slow as alpha2/tau2 — fitter must canonicalise.
     hist = _synthetic_histogram(
-        alpha1=500.0, tau1=0.5, alpha2=50.0, tau2=3.5,
-        background=10.0, t0=1.0, sigma=0.21, total_photons=2e5, rng=rng,
+        alpha1=500.0,
+        tau1=0.5,
+        alpha2=50.0,
+        tau2=3.5,
+        background=10.0,
+        t0=1.0,
+        sigma=0.21,
+        total_photons=2e5,
+        rng=rng,
     )
     fit = fit_double_exp(hist, BIN_NS)
     assert fit.success, fit.message
@@ -123,11 +140,21 @@ def test_canonical_tau_ordering():
 def test_derived_mean_lifetimes_match_manual():
     """Amplitude- and intensity-weighted mean lifetime match hand calculation."""
     fit = DoubleExpFit(
-        alpha1=0.141, tau1=3.8114, alpha2=1.5836, tau2=0.60638,
-        background=0.0, t0=1.012, sigma=0.21, chi2_reduced=1.0,
-        residuals=np.zeros(5), residuals_weighted=np.zeros(5),
-        model=np.zeros(5), fit_mask=np.ones(5, dtype=bool), n_photons=1.0,
-        success=True, message="",
+        alpha1=0.141,
+        tau1=3.8114,
+        alpha2=1.5836,
+        tau2=0.60638,
+        background=0.0,
+        t0=1.012,
+        sigma=0.21,
+        chi2_reduced=1.0,
+        residuals=np.zeros(5),
+        residuals_weighted=np.zeros(5),
+        model=np.zeros(5),
+        fit_mask=np.ones(5, dtype=bool),
+        n_photons=1.0,
+        success=True,
+        message="",
     )
     # Matches header_state_avgtau = 0.86871 from the example param file
     assert fit.tau_amp_weighted == pytest.approx(0.8687, abs=0.001)
@@ -139,8 +166,15 @@ def test_fit_range_excludes_outside_bins():
     """Bins outside [fit_start, fit_stop] must not influence chi²."""
     rng = np.random.default_rng(seed=1)
     hist = _synthetic_histogram(
-        alpha1=100.0, tau1=3.8, alpha2=800.0, tau2=0.6,
-        background=5.0, t0=1.012, sigma=0.21, total_photons=2e5, rng=rng,
+        alpha1=100.0,
+        tau1=3.8,
+        alpha2=800.0,
+        tau2=0.6,
+        background=5.0,
+        t0=1.012,
+        sigma=0.21,
+        total_photons=2e5,
+        rng=rng,
     )
     # Poison the first bin with a huge spike — fit should still succeed
     hist[0] += 50_000

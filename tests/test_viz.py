@@ -12,11 +12,11 @@ import numpy as np
 import plotly.graph_objects as go
 import pytest
 
+from flipr.align.peth import build_peth
 from flipr.io.session_csv import load_session
 from flipr.io.tidy_csv import list_tidy_files, load_tidy, match_tidy_to_session
 from flipr.preprocess.lifetime import fit_double_exp
-from flipr.align.peth import build_peth
-from flipr.preprocess.phasor import phasor_from_histogram, phasor_series_from_tcspc
+from flipr.preprocess.phasor import phasor_series_from_tcspc
 from flipr.viz.peth import peth_figure
 from flipr.viz.phasor import phasor_plot_figure
 from flipr.viz.tcspc import fit_params_table, tcspc_decay_figure
@@ -93,8 +93,11 @@ def test_phasor_plot_figure_builds_empty():
 def test_peth_figure_builds_from_real_session():
     session = load_session(DATA_ROOT / "sessions" / EXAMPLE_BLOCK)
     peth = build_peth(
-        session, "solution_onset", signal="lifetime",
-        pre_window=-3.0, post_window=5.0,
+        session,
+        "solution_onset",
+        signal="lifetime",
+        pre_window=-3.0,
+        post_window=5.0,
     )
     fig = peth_figure(peth, title="test PETH")
     assert isinstance(fig, go.Figure)
@@ -105,8 +108,11 @@ def test_peth_figure_builds_from_real_session():
 def test_peth_figure_baseline_corrected_builds():
     session = load_session(DATA_ROOT / "sessions" / EXAMPLE_BLOCK)
     peth = build_peth(
-        session, "solution_onset", signal="lifetime",
-        pre_window=-3.0, post_window=5.0,
+        session,
+        "solution_onset",
+        signal="lifetime",
+        pre_window=-3.0,
+        post_window=5.0,
     )
     bc = peth.baseline_corrected(window=(-2.5, -0.1))
     fig = peth_figure(bc)

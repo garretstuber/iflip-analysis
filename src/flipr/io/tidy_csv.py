@@ -97,8 +97,7 @@ def _load_params(path: Path) -> dict[str, str]:
     df = pd.read_csv(path)
     # values are quoted strings; strip whitespace
     return {
-        str(k).strip(): str(v).strip()
-        for k, v in zip(df["variable"], df["value"], strict=False)
+        str(k).strip(): str(v).strip() for k, v in zip(df["variable"], df["value"], strict=False)
     }
 
 

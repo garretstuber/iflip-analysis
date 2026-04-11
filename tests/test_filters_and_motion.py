@@ -222,9 +222,7 @@ def test_compute_qc_on_real_head_fixed_session_is_near_zero():
     summary = qc.summary()
     # Clean head-fixed recording: both starvation and jumps should be
     # ~0%, so "any" should be well under 0.5%
-    assert summary["any"] < 0.005, (
-        f"too many QC flags on a clean head-fixed session: {summary}"
-    )
+    assert summary["any"] < 0.005, f"too many QC flags on a clean head-fixed session: {summary}"
     assert summary["intensity"] < 0.005
     assert summary["jump"] < 0.005
 

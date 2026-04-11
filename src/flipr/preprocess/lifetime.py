@@ -167,7 +167,9 @@ class DoubleExpFit:
     sigma: float  # ns, IRF 1-σ width
     chi2_reduced: float
     residuals: np.ndarray  # full-range (histogram - model)
-    residuals_weighted: np.ndarray  # (histogram - model) / sqrt(max(histogram, 1)), restricted to fit_mask
+    residuals_weighted: (
+        np.ndarray
+    )  # (histogram - model) / sqrt(max(histogram, 1)), restricted to fit_mask
     model: np.ndarray  # full-range model values
     fit_mask: np.ndarray  # bool, which bins were used for fit + chi²
     n_photons: float  # sum of histogram inside fit range
@@ -266,17 +268,13 @@ def fit_double_exp(
     bin_ns = np.asarray(bin_ns, dtype=np.float64)
 
     if histogram.shape != bin_ns.shape:
-        raise ValueError(
-            f"histogram {histogram.shape} and bin_ns {bin_ns.shape} must match"
-        )
+        raise ValueError(f"histogram {histogram.shape} and bin_ns {bin_ns.shape} must match")
     if fit_stop_ns <= fit_start_ns:
         raise ValueError(f"fit_stop_ns ({fit_stop_ns}) must exceed fit_start_ns ({fit_start_ns})")
 
     fit_mask = (bin_ns >= fit_start_ns) & (bin_ns <= fit_stop_ns)
     if not fit_mask.any():
-        raise ValueError(
-            f"fit range [{fit_start_ns}, {fit_stop_ns}] ns contains no bins"
-        )
+        raise ValueError(f"fit range [{fit_start_ns}, {fit_stop_ns}] ns contains no bins")
 
     t_fit = bin_ns[fit_mask]
     y_fit = histogram[fit_mask]
@@ -303,8 +301,16 @@ def fit_double_exp(
 
         def _model(t, a1, tau1, a2, tau2, bg):
             return double_exp_model(
-                t, a1, tau1, a2, tau2, bg, t0_ns, irf_sigma_ns,
-                period_ns=period_ns, n_wraps=n_wraps,
+                t,
+                a1,
+                tau1,
+                a2,
+                tau2,
+                bg,
+                t0_ns,
+                irf_sigma_ns,
+                period_ns=period_ns,
+                n_wraps=n_wraps,
             )
 
         p0 = [init["alpha1"], init["tau1"], init["alpha2"], init["tau2"], init["background"]]
@@ -314,8 +320,16 @@ def fit_double_exp(
 
         def _model(t, a1, tau1, a2, tau2, bg, t0):  # noqa: PLR0913
             return double_exp_model(
-                t, a1, tau1, a2, tau2, bg, t0, irf_sigma_ns,
-                period_ns=period_ns, n_wraps=n_wraps,
+                t,
+                a1,
+                tau1,
+                a2,
+                tau2,
+                bg,
+                t0,
+                irf_sigma_ns,
+                period_ns=period_ns,
+                n_wraps=n_wraps,
             )
 
         p0 = [
@@ -332,8 +346,16 @@ def fit_double_exp(
 
         def _model(t, a1, tau1, a2, tau2, bg, t0, sig):  # noqa: PLR0913
             return double_exp_model(
-                t, a1, tau1, a2, tau2, bg, t0, sig,
-                period_ns=period_ns, n_wraps=n_wraps,
+                t,
+                a1,
+                tau1,
+                a2,
+                tau2,
+                bg,
+                t0,
+                sig,
+                period_ns=period_ns,
+                n_wraps=n_wraps,
             )
 
         p0 = [
@@ -382,8 +404,16 @@ def fit_double_exp(
         alpha1, alpha2 = alpha2, alpha1
 
     model_full = double_exp_model(
-        bin_ns, alpha1, tau1, alpha2, tau2, background, t0_final, sigma_final,
-        period_ns=period_ns, n_wraps=n_wraps,
+        bin_ns,
+        alpha1,
+        tau1,
+        alpha2,
+        tau2,
+        background,
+        t0_final,
+        sigma_final,
+        period_ns=period_ns,
+        n_wraps=n_wraps,
     )
     residuals_full = histogram - model_full
     residuals_weighted_fit = residuals_full[fit_mask] / sigma_fit

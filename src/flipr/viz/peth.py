@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -45,8 +44,7 @@ def peth_figure(
             colorbar=dict(title=peth.signal_name, thickness=14),
             zsmooth=False,
             hovertemplate=(
-                "trial %{y}<br>t=%{x:.2f}s<br>"
-                f"{peth.signal_name}=" "%{z:.4f}<extra></extra>"
+                f"trial %{{y}}<br>t=%{{x:.2f}}s<br>{peth.signal_name}=%{{z:.4f}}<extra></extra>"
             ),
         ),
         row=1,
@@ -101,8 +99,12 @@ def peth_figure(
 
     # Event marker at t = 0 on both panels
     fig.add_vline(
-        x=0, line_dash="dot", line_color="#d62728", line_width=2,
-        row="all", col=1,
+        x=0,
+        line_dash="dot",
+        line_color="#d62728",
+        line_width=2,
+        row="all",
+        col=1,
     )
 
     fig.update_xaxes(title_text="time from event (s)", row=2, col=1)

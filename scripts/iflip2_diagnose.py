@@ -33,7 +33,7 @@ def hexdump(buf: bytes, offset: int, length: int = 64) -> str:
         chunk = buf[offset + i : offset + i + 16]
         hexpart = " ".join(f"{b:02x}" for b in chunk)
         ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
-        out.append(f"  {offset+i:08x}  {hexpart:<48}  {ascii_part}")
+        out.append(f"  {offset + i:08x}  {hexpart:<48}  {ascii_part}")
     return "\n".join(out)
 
 

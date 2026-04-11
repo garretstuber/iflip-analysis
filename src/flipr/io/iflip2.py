@@ -402,8 +402,7 @@ def load_iflip2(path: str | Path) -> IFlip2File:
         n_frames = body_len // FRAME_BYTES
         if n_frames == 0:
             raise ValueError(
-                f"iFLiP2 body of {body_len} bytes is shorter than one "
-                f"{FRAME_BYTES}-byte frame"
+                f"iFLiP2 body of {body_len} bytes is shorter than one {FRAME_BYTES}-byte frame"
             )
     else:
         n_frames = body_len // FRAME_BYTES

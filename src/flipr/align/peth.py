@@ -65,13 +65,13 @@ class PETH:
             sem = np.where(n_valid > 1, std / np.sqrt(n_valid), np.nan)
         return sem
 
-    def baseline_corrected(self, window: tuple[float, float] = (-1.0, 0.0)) -> "PETH":
+    def baseline_corrected(self, window: tuple[float, float] = (-1.0, 0.0)) -> PETH:
         """Subtract each trial's mean over ``window`` (pre-event default)."""
         mask = self._window_mask(window)
         baseline = np.nanmean(self.values[:, mask], axis=1, keepdims=True)
         return replace(self, values=self.values - baseline)
 
-    def zscored(self, window: tuple[float, float] = (-1.0, 0.0)) -> "PETH":
+    def zscored(self, window: tuple[float, float] = (-1.0, 0.0)) -> PETH:
         """Z-score each trial using the mean & std over ``window``."""
         mask = self._window_mask(window)
         mu = np.nanmean(self.values[:, mask], axis=1, keepdims=True)
@@ -148,16 +148,13 @@ def build_peth(
     """
     if signal not in session.streams.columns:
         raise KeyError(
-            f"signal {signal!r} not in session.streams columns "
-            f"{list(session.streams.columns)}"
+            f"signal {signal!r} not in session.streams columns {list(session.streams.columns)}"
         )
     fs = session.fs
     if not (fs > 0):
         raise ValueError(f"invalid sampling rate: {fs}")
     if post_window <= pre_window:
-        raise ValueError(
-            f"post_window ({post_window}) must exceed pre_window ({pre_window})"
-        )
+        raise ValueError(f"post_window ({post_window}) must exceed pre_window ({pre_window})")
 
     t_stream = session.streams["time"].to_numpy()
     signal_arr = session.streams[signal].to_numpy()

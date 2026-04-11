@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from flipr.align.peth import PETH, build_peth
+from flipr.align.peth import build_peth
 from flipr.io.session_csv import SessionData, load_session
 
 DATA_ROOT = Path(__file__).resolve().parents[2] / "FLIPR data"
@@ -212,8 +211,11 @@ def test_real_peth_matches_precomputed_df_streams_peth():
     pre = float(precomputed.columns.min())
     post = float(precomputed.columns.max())
     peth = build_peth(
-        session, "solution_onset", signal="lifetime",
-        pre_window=pre, post_window=post,
+        session,
+        "solution_onset",
+        signal="lifetime",
+        pre_window=pre,
+        post_window=post,
     )
 
     assert peth.n_trials == precomputed.shape[0]
@@ -237,8 +239,11 @@ def test_real_peth_baseline_correction_shifts_response_sign():
     lifetime should show a clear deflection during the post-event window."""
     session = load_session(DATA_ROOT / "sessions" / EXAMPLE_BLOCK)
     peth = build_peth(
-        session, "solution_onset", signal="lifetime",
-        pre_window=-3.0, post_window=5.0,
+        session,
+        "solution_onset",
+        signal="lifetime",
+        pre_window=-3.0,
+        post_window=5.0,
     )
     bc = peth.baseline_corrected(window=(-2.5, -0.5))
     # Pre-baseline mean should be ~0 after correction

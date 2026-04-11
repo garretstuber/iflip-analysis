@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
@@ -135,9 +135,13 @@ def session_traces_figure(
     if highlight_range is not None:
         t0, t1 = highlight_range
         fig.add_vrect(
-            x0=t0, x1=t1,
-            fillcolor="orange", opacity=0.18, line_width=0,
-            row="all", col=1,
+            x0=t0,
+            x1=t1,
+            fillcolor="orange",
+            opacity=0.18,
+            line_width=0,
+            row="all",
+            col=1,
         )
 
     fig.update_xaxes(title_text="time (s)", row=2, col=1)

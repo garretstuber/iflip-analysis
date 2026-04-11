@@ -84,9 +84,13 @@ def tcspc_decay_figure(
             x0 = float(fit_bins.min())
             x1 = float(fit_bins.max())
             fig.add_vrect(
-                x0=x0, x1=x1,
-                fillcolor="#d62728", opacity=0.06, line_width=0,
-                row="all", col=1,
+                x0=x0,
+                x1=x1,
+                fillcolor="#d62728",
+                opacity=0.06,
+                line_width=0,
+                row="all",
+                col=1,
             )
 
         # Bottom panel: weighted residuals on fit range only
@@ -134,7 +138,7 @@ def fit_params_table(fit: DoubleExpFit) -> list[dict[str, object]]:
         {"param": "τ̄ amplitude-weighted (ns)", "value": f"{fit.tau_amp_weighted:.3f}"},
         {"param": "τ̄ intensity-weighted (ns)", "value": f"{fit.tau_int_weighted:.3f}"},
         {"param": "α₁ / α₂", "value": f"{fit.alpha1:.2e} / {fit.alpha2:.2e}"},
-        {"param": "slow population fraction", "value": f"{fit.pop1_fraction*100:.1f}%"},
+        {"param": "slow population fraction", "value": f"{fit.pop1_fraction * 100:.1f}%"},
         {"param": "background", "value": f"{fit.background:.2e}"},
         {"param": "t₀ (ns) / σ_IRF (ns)", "value": f"{fit.t0:.3f} / {fit.sigma:.3f}"},
         {"param": "χ² reduced", "value": f"{fit.chi2_reduced:.2f}"},

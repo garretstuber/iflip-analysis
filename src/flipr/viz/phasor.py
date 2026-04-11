@@ -64,7 +64,10 @@ def phasor_plot_figure(
     # Axis box: (0,0) to (1,0) baseline
     fig.add_shape(
         type="line",
-        x0=0.0, x1=1.0, y0=0.0, y1=0.0,
+        x0=0.0,
+        x1=1.0,
+        y0=0.0,
+        y1=0.0,
         line=dict(color="#bbb", width=1, dash="dot"),
     )
 
@@ -109,7 +112,8 @@ def phasor_plot_figure(
                 y=S_ref,
                 mode="markers+text",
                 marker=dict(
-                    size=12, symbol="diamond",
+                    size=12,
+                    symbol="diamond",
                     color="#d62728",
                     line=dict(width=1, color="black"),
                 ),
@@ -127,8 +131,9 @@ def phasor_plot_figure(
                 x=[highlight[0]],
                 y=[highlight[1]],
                 mode="markers",
-                marker=dict(size=16, symbol="star", color="orange",
-                            line=dict(width=2, color="black")),
+                marker=dict(
+                    size=16, symbol="star", color="orange", line=dict(width=2, color="black")
+                ),
                 name="selected window",
                 hovertemplate="G=%{x:.3f}<br>S=%{y:.3f}<extra></extra>",
             )

@@ -117,7 +117,10 @@ def cached_qc(
 ) -> QCResult:
     session = cached_load_session(session_path)
     filt = filtered_session(
-        session, mode=filter_mode, window_s=window_s, polyorder=polyorder  # type: ignore[arg-type]
+        session,
+        mode=filter_mode,
+        window_s=window_s,
+        polyorder=polyorder,  # type: ignore[arg-type]
     )
     return compute_qc(
         filt,
@@ -154,10 +157,16 @@ def sidebar() -> SidebarState:
     st.sidebar.caption("v0.0.1")
 
     empty_state = SidebarState(
-        data_root=None, session_raw=None, session=None, session_path=None,
-        tcspc_source=None, tcspc_source_label="",
-        filter_mode="none", filter_window_s=0.25,
-        filter_polyorder=2, qc_motion_window_s=1.0,
+        data_root=None,
+        session_raw=None,
+        session=None,
+        session_path=None,
+        tcspc_source=None,
+        tcspc_source_label="",
+        filter_mode="none",
+        filter_window_s=0.25,
+        filter_polyorder=2,
+        qc_motion_window_s=1.0,
         qc_motion_corr_threshold=0.85,
     )
 
@@ -220,8 +229,8 @@ def sidebar() -> SidebarState:
             options=source_options,
             index=default_idx,
             help="The raw .iFLiP2 file is the source of truth produced "
-                 "directly by the acquisition rig; the tidy CSV is an "
-                 "export of the same data. Use raw when available.",
+            "directly by the acquisition rig; the tidy CSV is an "
+            "export of the same data. Use raw when available.",
         )
         try:
             if chosen == "raw .iFLiP2" and iflip2_match is not None:
@@ -256,13 +265,20 @@ def sidebar() -> SidebarState:
     else:
         window_s = st.sidebar.number_input(
             "window (s)",
-            min_value=0.05, max_value=10.0, value=0.25, step=0.05,
+            min_value=0.05,
+            max_value=10.0,
+            value=0.25,
+            step=0.05,
             key="filter_window",
         )
         if filter_mode == "savgol":
             polyorder = int(
                 st.sidebar.number_input(
-                    "polyorder", min_value=1, max_value=5, value=2, step=1,
+                    "polyorder",
+                    min_value=1,
+                    max_value=5,
+                    value=2,
+                    step=1,
                     key="filter_polyorder",
                 )
             )
@@ -270,8 +286,10 @@ def sidebar() -> SidebarState:
             polyorder = 2
 
     session = filtered_session(
-        session_raw, mode=filter_mode,  # type: ignore[arg-type]
-        window_s=float(window_s), polyorder=int(polyorder),
+        session_raw,
+        mode=filter_mode,  # type: ignore[arg-type]
+        window_s=float(window_s),
+        polyorder=int(polyorder),
     )
 
     # --- QC correlation-diagnostic controls ---
@@ -281,12 +299,20 @@ def sidebar() -> SidebarState:
             "see the Overview tab. Not used for flagging."
         )
         qc_motion_window_s = st.number_input(
-            "rolling window (s)", min_value=0.1, max_value=30.0,
-            value=1.0, step=0.1, key="qc_motion_window",
+            "rolling window (s)",
+            min_value=0.1,
+            max_value=30.0,
+            value=1.0,
+            step=0.1,
+            key="qc_motion_window",
         )
         qc_motion_corr_threshold = st.slider(
-            "highlight |r| above", min_value=0.3, max_value=0.99,
-            value=0.85, step=0.01, key="qc_motion_threshold",
+            "highlight |r| above",
+            min_value=0.3,
+            max_value=0.99,
+            value=0.85,
+            step=0.01,
+            key="qc_motion_threshold",
         )
 
     # Session metadata block
@@ -376,7 +402,9 @@ def render_overview(
     mc1, mc2, mc3, mc4 = st.columns(4)
     streams = session.streams
     mc1.metric("mean intensity", f"{streams['intensity'].mean():,.0f}")
-    mc2.metric("intensity CV", f"{streams['intensity'].std() / max(streams['intensity'].mean(), 1):.3f}")
+    mc2.metric(
+        "intensity CV", f"{streams['intensity'].std() / max(streams['intensity'].mean(), 1):.3f}"
+    )
     mc3.metric("mean τ (ns)", f"{streams['lifetime'].mean():.3f}")
     mc4.metric("τ std (ns)", f"{streams['lifetime'].std():.3f}")
 
@@ -395,12 +423,12 @@ def render_overview(
         )
         summary = qc.summary()
         qc_cols = st.columns(4)
-        qc_cols[0].metric("flagged (any)", f"{summary['any']*100:.2f}%")
-        qc_cols[1].metric("low photons", f"{summary['intensity']*100:.2f}%")
-        qc_cols[2].metric("intensity jumps", f"{summary['jump']*100:.2f}%")
+        qc_cols[0].metric("flagged (any)", f"{summary['any'] * 100:.2f}%")
+        qc_cols[1].metric("low photons", f"{summary['intensity'] * 100:.2f}%")
+        qc_cols[2].metric("intensity jumps", f"{summary['jump'] * 100:.2f}%")
         qc_cols[3].metric(
             "|rolling r| above threshold (diagnostic)",
-            f"{summary['corr_above_threshold']*100:.2f}%",
+            f"{summary['corr_above_threshold'] * 100:.2f}%",
             help="Informational only — NOT counted in the flagged total.",
         )
 
@@ -508,10 +536,16 @@ def render_interval(session: SessionData, tidy: TCSPCSource) -> None:
 
     with st.expander("fit settings", expanded=False):
         c1, c2, c3, c4 = st.columns(4)
-        irf = c1.number_input("IRF σ (ns)", value=default_irf, min_value=0.05, max_value=2.0, step=0.01)
+        irf = c1.number_input(
+            "IRF σ (ns)", value=default_irf, min_value=0.05, max_value=2.0, step=0.01
+        )
         t0 = c2.number_input("t₀ (ns)", value=default_t0, min_value=0.0, max_value=5.0, step=0.01)
-        fit_lo = c3.number_input("fit start (ns)", value=default_start, min_value=0.0, max_value=10.0, step=0.1)
-        fit_hi = c4.number_input("fit stop (ns)", value=default_stop, min_value=1.0, max_value=12.5, step=0.1)
+        fit_lo = c3.number_input(
+            "fit start (ns)", value=default_start, min_value=0.0, max_value=10.0, step=0.1
+        )
+        fit_hi = c4.number_input(
+            "fit stop (ns)", value=default_stop, min_value=1.0, max_value=12.5, step=0.1
+        )
 
     fit = cached_fit(hist, tidy.tcspc_bins_ns, irf, t0, fit_lo, fit_hi)
 
@@ -530,6 +564,7 @@ def render_interval(session: SessionData, tidy: TCSPCSource) -> None:
         )
     with pc2:
         st.markdown("**Instrument header (reference)**")
+
         # Stringify explicitly — tidy CSV returns str values, iFLiP2 returns
         # float/int, and mixing them in a "value" column gives pandas an
         # object dtype that Streamlit's Arrow serialiser can't convert.
@@ -709,7 +744,7 @@ def render_peth(session: SessionData, *, filter_label: str = "raw") -> None:
             options=["raw", "baseline-corrected", "z-scored"],
             index=1,
             help="baseline-corrected = subtract pre-event baseline; "
-                 "z-scored = (x - baseline_mean) / baseline_std",
+            "z-scored = (x - baseline_mean) / baseline_std",
         )
 
     col_pre, col_post, col_bl_lo, col_bl_hi = st.columns(4)
@@ -723,14 +758,20 @@ def render_peth(session: SessionData, *, filter_label: str = "raw") -> None:
         )
     with col_bl_lo:
         bl_lo = st.number_input(
-            "baseline start (s)", min_value=-60.0, max_value=0.0,
-            value=max(float(pre_window), -2.5), step=0.1,
+            "baseline start (s)",
+            min_value=-60.0,
+            max_value=0.0,
+            value=max(float(pre_window), -2.5),
+            step=0.1,
             disabled=(norm_mode == "raw"),
         )
     with col_bl_hi:
         bl_hi = st.number_input(
-            "baseline end (s)", min_value=-60.0, max_value=5.0,
-            value=-0.1, step=0.1,
+            "baseline end (s)",
+            min_value=-60.0,
+            max_value=5.0,
+            value=-0.1,
+            step=0.1,
             disabled=(norm_mode == "raw"),
         )
 
@@ -875,7 +916,8 @@ def main() -> None:
         else:
             st.caption(f"TCSPC source: **{state.tcspc_source_label}**")
             render_phasor(
-                session_raw, tcspc_source,
+                session_raw,
+                tcspc_source,
                 interval_range=st.session_state["interval_range"],
             )
 

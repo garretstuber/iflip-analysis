@@ -132,17 +132,19 @@ def phasor_from_histogram(
     n_used = hist_sliced.shape[-1]
     if hist_sliced.sum() <= 0:
         return PhasorResult(
-            real=float("nan"), imag=float("nan"), mean=0.0,
+            real=float("nan"),
+            imag=float("nan"),
+            mean=0.0,
             frequency_mhz=1000.0 / (n_used * bin_step),
-            tau_phase=float("nan"), tau_mod=float("nan"),
-            n_bins_used=n_used, n_photons=0.0,
+            tau_phase=float("nan"),
+            tau_mod=float("nan"),
+            n_bins_used=n_used,
+            n_photons=0.0,
         )
 
     mean, real, imag = phasor_from_signal(hist_sliced, axis=-1)
     freq_mhz = 1000.0 / (n_used * bin_step)  # MHz
-    tau_phi, tau_mod = phasor_to_apparent_lifetime(
-        float(real), float(imag), freq_mhz
-    )
+    tau_phi, tau_mod = phasor_to_apparent_lifetime(float(real), float(imag), freq_mhz)
     return PhasorResult(
         real=float(real),
         imag=float(imag),
