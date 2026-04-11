@@ -4,34 +4,31 @@ Unlike intensity-only photometry (dLight, GCaMP), lifetime is intrinsically
 ratiometric — the arrival-time distribution doesn't depend on how many
 photons you collect, only on how they're distributed. That means the
 classic 405-nm-isosbestic motion regression doesn't transfer directly.
-What *can* still go wrong on a FLIPR rig:
+Two things actually go wrong on a FLIPR rig in practice:
 
-1. **Photon starvation** — when the fibre coupling drops too low, there
-   aren't enough photons per bin to estimate a lifetime reliably, and the
-   per-frame τ estimate gets noisy. Detected as ``intensity`` dropping
-   below a user-chosen threshold.
+1. **Photon starvation** — when fibre coupling drops too low, there
+   aren't enough photons per frame to estimate a lifetime reliably and
+   the per-frame τ becomes noisy. Detected as intensity samples ``k``
+   MADs below the session median (default ``k = 5``). A head-fixed
+   recording with stable coupling should return ~0 flags; a loose ferule
+   or fibre bending will light up.
 
-2. **Motion-coupled lifetime changes** — if the mouse moves and lifetime
-   AND intensity change together in a short window, something
-   non-biological is perturbing both (e.g. mechanical stress on the
-   fibre, PMT voltage change, scattering layer shift). Detected as high
-   |rolling correlation| between intensity and lifetime.
+2. **Sudden intensity jumps or drops** — fibre bumps, touch events,
+   cable snags. Detected by robust z-scoring the frame-to-frame
+   intensity derivative (median + MAD).
 
-   **Caveat:** for FLIM biosensors (e.g. FLIM-DA0.5), ligand binding
-   changes both the fluorescence lifetime and the absorption/emission
-   — so real biological signal can also produce moderate rolling
-   correlations. Treat this flag as a diagnostic, not a rejection
-   criterion. The default ``corr_threshold = 0.85`` is chosen to be
-   conservative enough not to clip normal biosensor dynamics; lower it
-   if you're investigating known motion epochs.
+These two conditions are the ``any_flag`` output of :func:`compute_qc`.
 
-3. **Sudden intensity drops or jumps** — fibre bumps and touch events
-   are well flagged by z-scoring the intensity derivative.
-
-This module provides three detectors that each return a 1-D boolean mask
-over the session (True = flagged), plus a convenience
-:func:`compute_qc` that runs all three and returns a small DataFrame
-with per-sample flags and the rolling correlation trace.
+The module additionally computes a **rolling Pearson correlation**
+between intensity and lifetime as a purely *diagnostic* trace. It is
+**not** part of the flag mask because for FLIM biosensors (e.g.
+FLIM-DA0.5), ligand binding changes both the fluorescence lifetime and
+the absorption/emission cross-sections, so real biological signal
+naturally produces moderate rolling correlations — a head-fixed
+recording can easily hit |r| > 0.85 from the sensor responding to
+reward delivery, not from motion. The trace is still worth plotting
+because it helps users spot unusual coupling between the two channels
+over the session, but it should not be used as a rejection criterion.
 """
 
 from __future__ import annotations
@@ -46,26 +43,37 @@ from flipr.io.session_csv import SessionData
 
 @dataclass
 class QCResult:
-    """Per-sample QC diagnostics for a session."""
+    """Per-sample QC diagnostics for a session.
+
+    ``any_flag`` is the union of ``intensity_flag`` and ``jump_flag`` —
+    the two detectors that correspond to genuine artifacts on a FLIPR
+    rig. ``rolling_corr`` and ``corr_above_threshold`` are purely
+    diagnostic and are NOT part of ``any_flag``.
+    """
 
     time: np.ndarray  # seconds, matching session.streams.time
-    intensity_flag: np.ndarray  # bool, low-photon mask
-    motion_flag: np.ndarray  # bool, high |corr| mask
+    intensity_flag: np.ndarray  # bool, photon-starvation mask
     jump_flag: np.ndarray  # bool, large dI/dt mask
-    rolling_corr: np.ndarray  # rolling Pearson r(intensity, lifetime)
-    any_flag: np.ndarray  # union of the three masks
+    rolling_corr: np.ndarray  # diagnostic: rolling Pearson r(intensity, lifetime)
+    corr_above_threshold: np.ndarray  # diagnostic: |rolling_corr| > user threshold
+    any_flag: np.ndarray  # intensity_flag | jump_flag
 
     @property
     def fraction_flagged(self) -> float:
         return float(self.any_flag.mean())
 
     def summary(self) -> dict[str, float]:
-        """Return a small dict of fractional flag rates for display."""
+        """Return a small dict of fractional flag rates for display.
+
+        ``intensity``, ``jump`` and ``any`` are true flag rates.
+        ``corr_above_threshold``, ``mean_corr`` and ``max_abs_corr`` are
+        diagnostic-only (not part of ``any``).
+        """
         return {
             "intensity": float(self.intensity_flag.mean()),
-            "motion": float(self.motion_flag.mean()),
             "jump": float(self.jump_flag.mean()),
             "any": self.fraction_flagged,
+            "corr_above_threshold": float(self.corr_above_threshold.mean()),
             "mean_corr": float(np.nanmean(self.rolling_corr)),
             "max_abs_corr": float(np.nanmax(np.abs(self.rolling_corr))),
         }
@@ -114,17 +122,29 @@ def detect_photon_starvation(
     intensity: np.ndarray,
     *,
     min_photons: float | None = None,
-    low_percentile: float = 1.0,
+    mad_k: float = 5.0,
 ) -> np.ndarray:
-    """Mark samples whose intensity is below ``min_photons``.
+    """Mark samples whose intensity is implausibly low.
 
-    If ``min_photons`` is None, it is set to the ``low_percentile``-th
-    percentile of the intensity distribution (default 1%) — useful as a
-    session-adaptive default.
+    If ``min_photons`` is given, it is used as an absolute threshold.
+    Otherwise the threshold is set adaptively to ``median − k · 1.4826 · MAD``
+    with ``k = mad_k`` (default 5), i.e. a robust k-σ lower bound. On a
+    stable recording this flags essentially nothing; on a session with
+    real coupling drops or fibre bends it flags exactly the transient
+    low-intensity epochs.
+
+    Note: the percentile-based auto-threshold that previous versions
+    used was tautological (always flagged ~1% of samples) — this robust
+    version produces a flag rate of ~0% on clean sessions and lets the
+    user see at a glance that the recording is fine.
     """
     intensity = np.asarray(intensity, dtype=np.float64)
     if min_photons is None:
-        min_photons = float(np.percentile(intensity, low_percentile))
+        med = float(np.median(intensity))
+        mad = float(np.median(np.abs(intensity - med))) + 1e-12
+        threshold = med - mad_k * 1.4826 * mad
+        # Don't go below zero photons — nonsensical
+        min_photons = max(threshold, 0.0)
     return intensity < min_photons
 
 
@@ -133,10 +153,16 @@ def detect_motion_correlation(
     lifetime: np.ndarray,
     *,
     window: int,
-    corr_threshold: float = 0.5,
+    corr_threshold: float = 0.85,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Flag samples where rolling |r(intensity, lifetime)| exceeds a
-    threshold. Returns ``(flag, rolling_corr)``.
+    """Compute a diagnostic rolling |r(intensity, lifetime)| mask.
+
+    .. warning::
+       For FLIM biosensors this should NOT be used as a motion rejection
+       criterion — ligand binding naturally produces correlated changes
+       in intensity and lifetime. The returned mask is kept for
+       visualisation, but :func:`compute_qc` does not include it in the
+       session-level ``any_flag`` output.
     """
     r = rolling_corr(intensity, lifetime, window=window)
     flag = np.zeros_like(r, dtype=bool)
@@ -167,26 +193,44 @@ def compute_qc(
     session: SessionData,
     *,
     min_photons: float | None = None,
+    photon_mad_k: float = 5.0,
     motion_window_s: float = 1.0,
     motion_corr_threshold: float = 0.85,
     jump_z_threshold: float = 6.0,
 ) -> QCResult:
-    """Run the full QC suite on a session and return per-sample flags.
+    """Run the QC detectors on a session.
 
     Parameters
     ----------
     session
         Loaded :class:`SessionData`.
     min_photons
-        Intensity threshold (photons per frame) below which the sample is
-        flagged as photon-starved. Default ``None`` → 1st percentile.
+        Absolute intensity threshold (photons per frame) below which the
+        sample is flagged as photon-starved. Default ``None`` →
+        robust ``median − photon_mad_k · 1.4826 · MAD`` threshold.
+    photon_mad_k
+        k-σ multiplier for the robust photon-starvation threshold.
+        Default 5.0 ≈ essentially zero false positives on Gaussian-
+        distributed data.
     motion_window_s
-        Rolling window (seconds) for the intensity/lifetime correlation.
+        Rolling window (seconds) for the diagnostic intensity/lifetime
+        correlation. Does not affect the flag mask.
     motion_corr_threshold
-        Absolute correlation above which a window is flagged as likely
-        motion.
+        Cosmetic threshold above which correlation samples are
+        highlighted in the UI. Does not affect the flag mask.
     jump_z_threshold
-        Robust z-score threshold for intensity jumps.
+        Robust z-score threshold for intensity jumps. Default 6.0.
+
+    Returns
+    -------
+    QCResult
+
+    Notes
+    -----
+    ``any_flag`` is ``intensity_flag | jump_flag`` — the rolling
+    correlation diagnostic is NOT included because, for FLIM biosensors,
+    ligand binding naturally produces correlated intensity/lifetime
+    changes that don't correspond to motion artifacts.
     """
     fs = session.fs
     t = session.streams["time"].to_numpy()
@@ -197,19 +241,22 @@ def compute_qc(
     if window % 2 == 0:
         window += 1
 
-    intensity_flag = detect_photon_starvation(intensity, min_photons=min_photons)
-    motion_flag, rcorr = detect_motion_correlation(
+    intensity_flag = detect_photon_starvation(
+        intensity, min_photons=min_photons, mad_k=photon_mad_k
+    )
+    corr_flag, rcorr = detect_motion_correlation(
         intensity, lifetime, window=window, corr_threshold=motion_corr_threshold
     )
     jump_flag = detect_intensity_jumps(intensity, z_threshold=jump_z_threshold)
 
-    any_flag = intensity_flag | motion_flag | jump_flag
+    # Only real-artifact detectors count toward any_flag
+    any_flag = intensity_flag | jump_flag
 
     return QCResult(
         time=t,
         intensity_flag=intensity_flag,
-        motion_flag=motion_flag,
         jump_flag=jump_flag,
         rolling_corr=rcorr,
+        corr_above_threshold=corr_flag,
         any_flag=any_flag,
     )

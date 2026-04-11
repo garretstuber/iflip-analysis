@@ -223,18 +223,19 @@ def sidebar() -> SidebarState:
         window_s=float(window_s), polyorder=int(polyorder),
     )
 
-    # --- Motion QC controls ---
-    with st.sidebar.expander("QC / motion detection", expanded=False):
+    # --- QC correlation-diagnostic controls ---
+    with st.sidebar.expander("QC · correlation diagnostic", expanded=False):
+        st.caption(
+            "Rolling r(intensity, lifetime) is informational only — "
+            "see the Overview tab. Not used for flagging."
+        )
         qc_motion_window_s = st.number_input(
             "rolling window (s)", min_value=0.1, max_value=30.0,
             value=1.0, step=0.1, key="qc_motion_window",
         )
         qc_motion_corr_threshold = st.slider(
-            "|corr| threshold", min_value=0.3, max_value=0.99,
+            "highlight |r| above", min_value=0.3, max_value=0.99,
             value=0.85, step=0.01, key="qc_motion_threshold",
-            help="Flag samples whose rolling Pearson r(intensity, lifetime) "
-                 "exceeds this. Biosensor sessions can show modest natural "
-                 "correlation, so 0.85 is the default.",
         )
 
     # Session metadata block
@@ -327,53 +328,77 @@ def render_overview(
     mc3.metric("mean τ (ns)", f"{streams['lifetime'].mean():.3f}")
     mc4.metric("τ std (ns)", f"{streams['lifetime'].std():.3f}")
 
-    # Motion / QC panel
+    # QC flags + diagnostic correlation
     if qc is not None:
         st.divider()
-        st.markdown("**QC · motion diagnostics**")
+        st.markdown("**QC · artifact flags**")
+        st.caption(
+            "Photon-starvation and intensity-jump flags are the only "
+            "true artifact detectors for FLIPR data. A stable head-fixed "
+            "recording should show ~0% flagged. The rolling intensity/"
+            "lifetime correlation shown below is a *diagnostic only* — "
+            "for FLIM biosensors it naturally tracks biology (ligand "
+            "binding changes both channels) and is not a motion "
+            "rejection criterion."
+        )
         summary = qc.summary()
-        qc_cols = st.columns(5)
+        qc_cols = st.columns(4)
         qc_cols[0].metric("flagged (any)", f"{summary['any']*100:.2f}%")
         qc_cols[1].metric("low photons", f"{summary['intensity']*100:.2f}%")
-        qc_cols[2].metric("motion (|r|)", f"{summary['motion']*100:.2f}%")
-        qc_cols[3].metric("intensity jumps", f"{summary['jump']*100:.2f}%")
-        qc_cols[4].metric("max |rolling r|", f"{summary['max_abs_corr']:.3f}")
-
-        import plotly.graph_objects as go
-
-        corr_fig = go.Figure()
-        corr_fig.add_trace(
-            go.Scattergl(
-                x=qc.time,
-                y=qc.rolling_corr,
-                mode="lines",
-                line=dict(color="#888", width=1),
-                name="rolling r(I, τ)",
-            )
+        qc_cols[2].metric("intensity jumps", f"{summary['jump']*100:.2f}%")
+        qc_cols[3].metric(
+            "|rolling r| above threshold (diagnostic)",
+            f"{summary['corr_above_threshold']*100:.2f}%",
+            help="Informational only — NOT counted in the flagged total.",
         )
-        # Shade flagged regions (subsample for speed)
-        flag = qc.any_flag
-        if flag.any():
+
+        with st.expander("rolling intensity/lifetime correlation (diagnostic)"):
+            import plotly.graph_objects as go
+
+            corr_fig = go.Figure()
             corr_fig.add_trace(
                 go.Scattergl(
-                    x=qc.time[flag],
-                    y=qc.rolling_corr[flag],
-                    mode="markers",
-                    marker=dict(size=4, color="#d62728"),
-                    name="flagged",
+                    x=qc.time,
+                    y=qc.rolling_corr,
+                    mode="lines",
+                    line=dict(color="#888", width=1),
+                    name="rolling r(I, τ)",
                 )
             )
-        corr_fig.add_hline(y=0, line_dash="dot", line_color="#bbb", line_width=1)
-        corr_fig.update_layout(
-            height=220,
-            margin=dict(l=60, r=20, t=10, b=40),
-            xaxis_title="time (s)",
-            yaxis_title="rolling r",
-            yaxis_range=[-1, 1],
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1),
-        )
-        st.plotly_chart(corr_fig, use_container_width=True)
+            above = qc.corr_above_threshold
+            if above.any():
+                corr_fig.add_trace(
+                    go.Scattergl(
+                        x=qc.time[above],
+                        y=qc.rolling_corr[above],
+                        mode="markers",
+                        marker=dict(size=4, color="#1f77b4"),
+                        name="above threshold (diagnostic)",
+                    )
+                )
+            # Genuine artifact flags highlighted in red
+            real = qc.any_flag
+            if real.any():
+                corr_fig.add_trace(
+                    go.Scattergl(
+                        x=qc.time[real],
+                        y=qc.rolling_corr[real],
+                        mode="markers",
+                        marker=dict(size=6, color="#d62728"),
+                        name="real flag (any_flag)",
+                    )
+                )
+            corr_fig.add_hline(y=0, line_dash="dot", line_color="#bbb", line_width=1)
+            corr_fig.update_layout(
+                height=240,
+                margin=dict(l=60, r=20, t=10, b=40),
+                xaxis_title="time (s)",
+                yaxis_title="rolling r",
+                yaxis_range=[-1, 1],
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1),
+            )
+            st.plotly_chart(corr_fig, use_container_width=True)
 
     # Per-event count summary
     with st.expander("event counts"):

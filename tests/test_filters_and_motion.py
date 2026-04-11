@@ -144,17 +144,36 @@ def test_rolling_corr_rejects_even_window():
         rolling_corr(np.zeros(10), np.zeros(10), window=10)
 
 
-def test_detect_photon_starvation():
+def test_detect_photon_starvation_absolute_threshold():
     intensity = np.array([1000, 1100, 950, 50, 40, 1050, 980])
     mask = detect_photon_starvation(intensity, min_photons=200)
     np.testing.assert_array_equal(mask, [False, False, False, True, True, False, False])
 
 
-def test_detect_photon_starvation_auto_threshold():
-    intensity = np.concatenate([np.ones(95) * 1000, np.ones(5) * 10])
-    mask = detect_photon_starvation(intensity, min_photons=None, low_percentile=5.0)
-    # The 5% threshold should sit between the two populations
-    assert mask.sum() >= 1 and mask.sum() <= 5
+def test_detect_photon_starvation_mad_threshold_catches_real_drops():
+    """MAD-based auto-threshold should catch genuine drops but not flag
+    nominally stable data."""
+    rng = np.random.default_rng(5)
+    n = 1000
+    # Stable population around 1000 with small noise, plus 3 genuine drops
+    intensity = 1000 + rng.normal(0, 10, n)
+    intensity[500] = 200.0
+    intensity[700] = 150.0
+    intensity[800] = 50.0
+    mask = detect_photon_starvation(intensity, min_photons=None, mad_k=5.0)
+    # The three injected drops should be flagged
+    assert mask[500] and mask[700] and mask[800]
+    # And nothing else
+    assert mask.sum() == 3
+
+
+def test_detect_photon_starvation_mad_threshold_stable_session_zero_flags():
+    """A stable session with only Gaussian noise should have ~0 flags."""
+    rng = np.random.default_rng(6)
+    intensity = 1000 + rng.normal(0, 20, 10_000)
+    mask = detect_photon_starvation(intensity, min_photons=None, mad_k=5.0)
+    # Expected false-positive rate at 5σ is ~3e-7 — essentially zero.
+    assert mask.sum() <= 2
 
 
 def test_detect_intensity_jumps_flags_spike():
@@ -193,26 +212,32 @@ def test_filtered_session_on_real_data_preserves_shape():
 
 
 @pytestmark_real
-def test_compute_qc_on_real_session_default_thresholds():
-    """On a clean biosensor session, the default (conservative) motion
-    threshold should flag well under 5% of samples — lifetime and
-    intensity co-vary modestly because of biology, not motion."""
+def test_compute_qc_on_real_head_fixed_session_is_near_zero():
+    """The example session is a head-fixed recording with stable fibre
+    coupling. With the new defaults (MAD-based photon threshold, no
+    correlation in any_flag) the flagged rate must be ~0%."""
     session = load_session(DATA_ROOT / "sessions" / EXAMPLE_BLOCK)
-    qc = compute_qc(session)  # defaults: corr threshold 0.85
+    qc = compute_qc(session)
     assert qc.time.shape == (len(session.streams),)
     summary = qc.summary()
-    # Clean session: default thresholds should give a small flag rate
-    assert summary["any"] < 0.05, f"too many QC flags with defaults: {summary}"
-    # Rolling corr should exist on interior samples
-    assert np.isfinite(qc.rolling_corr[qc.time.size // 2])
+    # Clean head-fixed recording: both starvation and jumps should be
+    # ~0%, so "any" should be well under 0.5%
+    assert summary["any"] < 0.005, (
+        f"too many QC flags on a clean head-fixed session: {summary}"
+    )
+    assert summary["intensity"] < 0.005
+    assert summary["jump"] < 0.005
 
 
 @pytestmark_real
-def test_compute_qc_more_permissive_threshold_flags_more():
-    """Dropping the threshold to 0.5 should flag substantially more
-    samples than the default 0.85 — validates the threshold actually
-    affects the output."""
+def test_compute_qc_correlation_is_diagnostic_not_in_any_flag():
+    """The rolling correlation trace and its threshold-highlighting must
+    not affect any_flag."""
     session = load_session(DATA_ROOT / "sessions" / EXAMPLE_BLOCK)
-    strict = compute_qc(session)  # default 0.85
-    permissive = compute_qc(session, motion_corr_threshold=0.5)
-    assert permissive.motion_flag.sum() > strict.motion_flag.sum() * 3
+    # Even with a very permissive correlation threshold, any_flag should
+    # not grow — correlation is purely diagnostic.
+    strict = compute_qc(session, motion_corr_threshold=0.99)
+    permissive = compute_qc(session, motion_corr_threshold=0.3)
+    assert strict.any_flag.sum() == permissive.any_flag.sum()
+    # But the diagnostic corr_above_threshold SHOULD grow with lower threshold
+    assert permissive.corr_above_threshold.sum() > strict.corr_above_threshold.sum() * 3
