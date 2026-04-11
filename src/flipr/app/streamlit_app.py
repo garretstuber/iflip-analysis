@@ -19,6 +19,12 @@ import pandas as pd
 import streamlit as st
 
 from flipr.align.peth import build_peth
+from flipr.io.iflip2 import (
+    IFlip2File,
+    list_iflip2_files,
+    load_iflip2,
+    match_iflip2_to_session,
+)
 from flipr.io.session_csv import SessionData, list_sessions, load_session
 from flipr.io.tidy_csv import (
     TidyData,
@@ -36,6 +42,11 @@ from flipr.viz.tcspc import fit_params_table, tcspc_decay_figure
 from flipr.viz.traces import session_traces_figure
 
 LOGO_PATH = Path(__file__).parent / "assets" / "FLIPRlogo.png"
+
+# Union type for objects that expose the TCSPC-source interface used by
+# the interval inspector and phasor tabs. Both TidyData (from tidy CSV
+# exports) and IFlip2File (from raw binary files) satisfy it.
+TCSPCSource = TidyData | IFlip2File
 
 # -----------------------------------------------------------------------------
 # Config
@@ -60,6 +71,11 @@ def cached_load_session(session_path: str) -> SessionData:
 @st.cache_data(show_spinner="Loading tidy TCSPC data…")
 def cached_load_tidy(data_csv: str) -> TidyData:
     return load_tidy(data_csv)
+
+
+@st.cache_data(show_spinner="Loading raw .iFLiP2 file…")
+def cached_load_iflip2(path: str) -> IFlip2File:
+    return load_iflip2(path)
 
 
 @st.cache_data(show_spinner="Fitting double-exponential…")
@@ -121,7 +137,8 @@ class SidebarState:
     session_raw: SessionData | None
     session: SessionData | None  # == session_raw if filter_mode == "none"
     session_path: Path | None
-    tidy: TidyData | None
+    tcspc_source: TCSPCSource | None  # TidyData or IFlip2File, whichever the user picked
+    tcspc_source_label: str  # e.g. "raw .iFLiP2" or "tidy CSV" for UI display
     filter_mode: str
     filter_window_s: float
     filter_polyorder: int
@@ -138,7 +155,8 @@ def sidebar() -> SidebarState:
 
     empty_state = SidebarState(
         data_root=None, session_raw=None, session=None, session_path=None,
-        tidy=None, filter_mode="none", filter_window_s=0.25,
+        tcspc_source=None, tcspc_source_label="",
+        filter_mode="none", filter_window_s=0.25,
         filter_polyorder=2, qc_motion_window_s=1.0,
         qc_motion_corr_threshold=0.85,
     )
@@ -172,18 +190,51 @@ def sidebar() -> SidebarState:
         st.sidebar.error(f"Failed to load session: {exc}")
         return replace(empty_state, data_root=data_root)
 
-    # Match to tidy file for TCSPC data (for the interval inspector + phasor)
+    # Find TCSPC sources: the raw .iFLiP2 (if present) is byte-exact,
+    # the tidy CSV is the exported form. Prefer iFLiP2 when both exist
+    # but let the user override in the UI.
+    iflip2_files = list_iflip2_files(data_root)
     tidy_files = list_tidy_files(data_root)
-    matched = match_tidy_to_session(tidy_files, session_raw.blockname)
-    tidy: TidyData | None = None
-    if matched is None:
-        st.sidebar.warning("No matching tidy/ file — Interval Inspector and Phasor will be disabled.")
+    iflip2_match = match_iflip2_to_session(iflip2_files, session_raw.blockname)
+    tidy_match = match_tidy_to_session(tidy_files, session_raw.blockname)
+
+    # Decide which options are available
+    source_options: list[str] = []
+    if iflip2_match is not None:
+        source_options.append("raw .iFLiP2")
+    if tidy_match is not None:
+        source_options.append("tidy CSV")
+
+    tcspc_source: TCSPCSource | None = None
+    tcspc_source_label: str = ""
+    if not source_options:
+        st.sidebar.warning(
+            "No matching raw/ or tidy/ file for this session — Interval "
+            "Inspector, Phasor, and QC are disabled."
+        )
     else:
-        st.sidebar.caption(f"Tidy file: `{matched.name}`")
+        # Default to iFLiP2 if present (source of truth)
+        default_idx = 0
+        chosen = st.sidebar.radio(
+            "TCSPC source",
+            options=source_options,
+            index=default_idx,
+            help="The raw .iFLiP2 file is the source of truth produced "
+                 "directly by the acquisition rig; the tidy CSV is an "
+                 "export of the same data. Use raw when available.",
+        )
         try:
-            tidy = cached_load_tidy(str(matched))
+            if chosen == "raw .iFLiP2" and iflip2_match is not None:
+                tcspc_source = cached_load_iflip2(str(iflip2_match))
+                tcspc_source_label = f"raw · {iflip2_match.name}"
+                st.sidebar.caption(f"Raw file: `{iflip2_match.name}`")
+            elif chosen == "tidy CSV" and tidy_match is not None:
+                tcspc_source = cached_load_tidy(str(tidy_match))
+                tcspc_source_label = f"tidy · {tidy_match.name}"
+                st.sidebar.caption(f"Tidy file: `{tidy_match.name}`")
         except Exception as exc:  # noqa: BLE001
-            st.sidebar.error(f"Failed to load tidy file: {exc}")
+            st.sidebar.error(f"Failed to load {chosen}: {exc}")
+            tcspc_source = None
 
     # --- Filter controls (global) ---
     st.sidebar.divider()
@@ -260,7 +311,8 @@ def sidebar() -> SidebarState:
         session_raw=session_raw,
         session=session,
         session_path=picked_path,
-        tidy=tidy,
+        tcspc_source=tcspc_source,
+        tcspc_source_label=tcspc_source_label,
         filter_mode=str(filter_mode),
         filter_window_s=float(window_s),
         filter_polyorder=int(polyorder),
@@ -415,7 +467,7 @@ def render_overview(
 # -----------------------------------------------------------------------------
 # Tab 2: Interval inspector
 # -----------------------------------------------------------------------------
-def render_interval(session: SessionData, tidy: TidyData) -> None:
+def render_interval(session: SessionData, tidy: TCSPCSource) -> None:
     st.subheader("Interval inspector")
     st.caption(
         "Sum TCSPC histograms across a user-selected time window and re-fit "
@@ -478,13 +530,24 @@ def render_interval(session: SessionData, tidy: TidyData) -> None:
         )
     with pc2:
         st.markdown("**Instrument header (reference)**")
+        # Stringify explicitly — tidy CSV returns str values, iFLiP2 returns
+        # float/int, and mixing them in a "value" column gives pandas an
+        # object dtype that Streamlit's Arrow serialiser can't convert.
+        def _fmt(key: str) -> str:
+            v = tidy.params.get(key)
+            if v is None:
+                return "—"
+            if isinstance(v, float):
+                return f"{v:.5g}"
+            return str(v)
+
         header_rows = [
-            ("τ₁ (ns)", tidy.params.get("header_state_tau1", "—")),
-            ("τ₂ (ns)", tidy.params.get("header_state_tau2", "—")),
-            ("τ̄ avg (ns)", tidy.params.get("header_state_avgtau", "—")),
-            ("pop₁ %", tidy.params.get("header_state_pop1pct", "—")),
-            ("pop₂ %", tidy.params.get("header_state_pop2pct", "—")),
-            ("IRF β (ns)", tidy.params.get("header_state_beta6", "—")),
+            ("τ₁ (ns)", _fmt("header_state_tau1")),
+            ("τ₂ (ns)", _fmt("header_state_tau2")),
+            ("τ̄ avg (ns)", _fmt("header_state_avgtau")),
+            ("pop₁ %", _fmt("header_state_pop1pct")),
+            ("pop₂ %", _fmt("header_state_pop2pct")),
+            ("IRF β (ns)", _fmt("header_state_beta6")),
         ]
         st.dataframe(
             pd.DataFrame(header_rows, columns=["param", "value"]),
@@ -498,7 +561,7 @@ def render_interval(session: SessionData, tidy: TidyData) -> None:
 # -----------------------------------------------------------------------------
 def render_phasor(
     session: SessionData,
-    tidy: TidyData,
+    tidy: TCSPCSource,
     interval_range: tuple[float, float] | None = None,
 ) -> None:
     st.subheader("Phasor explorer")
@@ -738,7 +801,7 @@ def main() -> None:
 
     session = state.session  # filtered (or raw if filter_mode == 'none')
     session_raw = state.session_raw
-    tidy = state.tidy
+    tcspc_source = state.tcspc_source
 
     st.title(f"{session_raw.subject} · {session_raw.blockname}")
 
@@ -790,24 +853,31 @@ def main() -> None:
         )
 
     with tab_interval:
-        if tidy is None:
+        if tcspc_source is None:
             st.warning(
-                "Interval inspector requires a tidy/\\*_data.csv file matching "
-                "this session (for per-frame TCSPC histograms)."
+                "Interval inspector needs either a raw/\\*.iFLiP2 file or a "
+                "tidy/\\*_data.csv file matching this session (for per-frame "
+                "TCSPC histograms)."
             )
         else:
-            # Interval inspector uses raw session (stream filter is irrelevant;
-            # it re-fits TCSPC histograms directly).
-            render_interval(session_raw, tidy)
+            st.caption(f"TCSPC source: **{state.tcspc_source_label}**")
+            # Interval inspector uses the raw session (stream filter is
+            # irrelevant; it re-fits TCSPC histograms directly).
+            render_interval(session_raw, tcspc_source)
 
     with tab_phasor:
-        if tidy is None:
+        if tcspc_source is None:
             st.warning(
-                "Phasor explorer requires a tidy/\\*_data.csv file matching "
-                "this session (for per-frame TCSPC histograms)."
+                "Phasor explorer needs either a raw/\\*.iFLiP2 file or a "
+                "tidy/\\*_data.csv file matching this session (for per-frame "
+                "TCSPC histograms)."
             )
         else:
-            render_phasor(session_raw, tidy, interval_range=st.session_state["interval_range"])
+            st.caption(f"TCSPC source: **{state.tcspc_source_label}**")
+            render_phasor(
+                session_raw, tcspc_source,
+                interval_range=st.session_state["interval_range"],
+            )
 
     with tab_peth:
         # PETH uses the FILTERED session so smoothing propagates
