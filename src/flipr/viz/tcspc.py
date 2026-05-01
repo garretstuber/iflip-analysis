@@ -1,4 +1,4 @@
-"""Plotly figures for TCSPC decay curves and double-exponential fits."""
+"""Plotly figures for TCSPC decay curves and exponential fits (single or double)."""
 
 from __future__ import annotations
 
@@ -6,17 +6,18 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from flipr.preprocess.lifetime import DoubleExpFit
+from flipr.preprocess.lifetime import DoubleExpFit, LifetimeFit, SingleExpFit
 
 
 def tcspc_decay_figure(
     histogram: np.ndarray,
     bin_ns: np.ndarray,
     *,
-    fit: DoubleExpFit | None = None,
+    fit: LifetimeFit | None = None,
     log_y: bool = True,
     title: str | None = None,
     height: int = 520,
+    show_t0_marker: bool = True,
 ) -> go.Figure:
     """Two-panel plot: TCSPC decay (top) + weighted residuals (bottom).
 
@@ -66,18 +67,31 @@ def tcspc_decay_figure(
     )
 
     if fit is not None:
+        fit_label = "single-exp fit" if isinstance(fit, SingleExpFit) else "double-exp fit"
         fig.add_trace(
             go.Scatter(
                 x=bin_ns,
                 y=fit.model,
                 mode="lines",
                 line=dict(color="#d62728", width=2),
-                name="double-exp fit",
+                name=fit_label,
                 hovertemplate="t=%{x:.2f}ns<br>model=%{y:,.0f}<extra></extra>",
             ),
             row=1,
             col=1,
         )
+        if show_t0_marker:
+            fig.add_vline(
+                x=fit.t0,
+                line_dash="dot",
+                line_color="#1f77b4",
+                line_width=1,
+                annotation_text=f"t₀ = {fit.t0:.2f} ns",
+                annotation_position="top",
+                annotation_font_size=10,
+                row=1,
+                col=1,
+            )
         # Shade the fit range on both panels
         fit_bins = bin_ns[fit.fit_mask]
         if fit_bins.size:
@@ -130,9 +144,26 @@ def tcspc_decay_figure(
     return fig
 
 
-def fit_params_table(fit: DoubleExpFit) -> list[dict[str, object]]:
-    """Return a list of ``{"param", "value"}`` rows for a Streamlit table."""
+def fit_params_table(fit: LifetimeFit) -> list[dict[str, object]]:
+    """Return a list of ``{"param", "value"}`` rows for a Streamlit table.
+
+    Dispatches on fit type so the same UI block can render either model.
+    """
+    if isinstance(fit, SingleExpFit):
+        return [
+            {"param": "model", "value": "single exponential"},
+            {"param": "τ (ns)", "value": f"{fit.tau:.3f}"},
+            {"param": "α", "value": f"{fit.alpha:.2e}"},
+            {"param": "background", "value": f"{fit.background:.2e}"},
+            {"param": "t₀ (ns) / σ_IRF (ns)", "value": f"{fit.t0:.3f} / {fit.sigma:.3f}"},
+            {"param": "χ² reduced", "value": f"{fit.chi2_reduced:.2f}"},
+            {"param": "photons in fit range", "value": f"{fit.n_photons:.2e}"},
+            {"param": "fit status", "value": "ok" if fit.success else fit.message},
+        ]
+
+    # DoubleExpFit
     return [
+        {"param": "model", "value": "double exponential"},
         {"param": "τ₁ (slow, ns)", "value": f"{fit.tau1:.3f}"},
         {"param": "τ₂ (fast, ns)", "value": f"{fit.tau2:.3f}"},
         {"param": "τ̄ amplitude-weighted (ns)", "value": f"{fit.tau_amp_weighted:.3f}"},
@@ -145,3 +176,7 @@ def fit_params_table(fit: DoubleExpFit) -> list[dict[str, object]]:
         {"param": "photons in fit range", "value": f"{fit.n_photons:.2e}"},
         {"param": "fit status", "value": "ok" if fit.success else fit.message},
     ]
+
+
+# Re-export for convenience
+__all__ = ["DoubleExpFit", "fit_params_table", "tcspc_decay_figure"]

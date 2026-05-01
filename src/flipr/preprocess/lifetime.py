@@ -1,4 +1,4 @@
-"""Double-exponential fitting of TCSPC decay histograms with a Gaussian IRF.
+"""Single- and double-exponential fitting of TCSPC decay histograms with a Gaussian IRF.
 
 The forward model for a photon-count histogram ``h(t)`` sampled at bin centers
 ``t`` (ns) is a two-component exponentially-modified Gaussian (EMG) plus a
@@ -437,3 +437,219 @@ def fit_double_exp(
         success=success,
         message=message,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Single-exponential model + fit
+# --------------------------------------------------------------------------- #
+
+
+def single_exp_model(
+    t: np.ndarray,
+    alpha: float,
+    tau: float,
+    background: float,
+    t0: float,
+    sigma: float,
+    *,
+    period_ns: float = 12.5,
+    n_wraps: int = 5,
+) -> np.ndarray:
+    """Single periodic EMG component plus background.
+
+    Same forward model as :func:`double_exp_model` with the second component
+    set to zero; useful when the decay is monoexponential or as a null
+    model for AIC/BIC comparison.
+    """
+    t = np.asarray(t, dtype=np.float64)
+    return _emg_periodic(t, alpha, tau, t0, sigma, period_ns, n_wraps) + background
+
+
+@dataclass
+class SingleExpFit:
+    """Result of a :func:`fit_single_exp` call."""
+
+    alpha: float
+    tau: float  # ns
+    background: float
+    t0: float  # ns
+    sigma: float  # ns, IRF 1-σ width
+    chi2_reduced: float
+    residuals: np.ndarray
+    residuals_weighted: np.ndarray
+    model: np.ndarray
+    fit_mask: np.ndarray
+    n_photons: float
+    success: bool
+    message: str
+
+    # Convenience aliases so the viz layer can treat single/double uniformly
+    @property
+    def tau_amp_weighted(self) -> float:
+        return float(self.tau)
+
+    @property
+    def tau_int_weighted(self) -> float:
+        return float(self.tau)
+
+    @property
+    def n_components(self) -> int:
+        return 1
+
+
+def fit_single_exp(
+    histogram: np.ndarray,
+    bin_ns: np.ndarray,
+    *,
+    irf_sigma_ns: float = 0.21,
+    t0_ns: float = 1.012,
+    fit_start_ns: float = 0.4,
+    fit_stop_ns: float = 12.3,
+    period_ns: float = 12.5,
+    n_wraps: int = 5,
+    initial: dict[str, float] | None = None,
+    fix_t0: bool = True,
+    fix_sigma: bool = True,
+) -> SingleExpFit:
+    """Fit a Gaussian-IRF-convolved single exponential to a TCSPC histogram.
+
+    Parameters mirror :func:`fit_double_exp` exactly. Useful when the
+    decay is genuinely monoexponential (e.g. a reference dye) or as a
+    null model for AIC/BIC comparison against the double-exponential
+    fit on the same data.
+    """
+    histogram = np.asarray(histogram, dtype=np.float64)
+    bin_ns = np.asarray(bin_ns, dtype=np.float64)
+
+    if histogram.shape != bin_ns.shape:
+        raise ValueError(f"histogram {histogram.shape} and bin_ns {bin_ns.shape} must match")
+    if fit_stop_ns <= fit_start_ns:
+        raise ValueError(f"fit_stop_ns ({fit_stop_ns}) must exceed fit_start_ns ({fit_start_ns})")
+
+    fit_mask = (bin_ns >= fit_start_ns) & (bin_ns <= fit_stop_ns)
+    if not fit_mask.any():
+        raise ValueError(f"fit range [{fit_start_ns}, {fit_stop_ns}] ns contains no bins")
+
+    t_fit = bin_ns[fit_mask]
+    y_fit = histogram[fit_mask]
+    sigma_fit = np.sqrt(np.maximum(y_fit, 1.0))
+    n_photons = float(y_fit.sum())
+
+    pre_mask = bin_ns < max(t0_ns - 0.5, bin_ns[0])
+    bg_guess = float(np.median(histogram[pre_mask])) if pre_mask.any() else 0.0
+    peak = float(np.max(y_fit)) if y_fit.size else 1.0
+    init: dict[str, float] = {
+        "alpha": peak * 1.0,
+        "tau": 2.5,
+        "background": max(bg_guess, 0.0),
+    }
+    if initial:
+        init.update(initial)
+
+    if fix_t0 and fix_sigma:
+
+        def _model(t, a, tau, bg):
+            return single_exp_model(
+                t, a, tau, bg, t0_ns, irf_sigma_ns,
+                period_ns=period_ns, n_wraps=n_wraps,
+            )
+
+        p0 = [init["alpha"], init["tau"], init["background"]]
+        lo = [0.0, 0.05, 0.0]
+        hi = [np.inf, 20.0, np.inf]
+    elif fix_sigma:
+
+        def _model(t, a, tau, bg, t0):
+            return single_exp_model(
+                t, a, tau, bg, t0, irf_sigma_ns,
+                period_ns=period_ns, n_wraps=n_wraps,
+            )
+
+        p0 = [init["alpha"], init["tau"], init["background"], t0_ns]
+        lo = [0.0, 0.05, 0.0, float(bin_ns[0])]
+        hi = [np.inf, 20.0, np.inf, float(bin_ns[-1])]
+    else:
+
+        def _model(t, a, tau, bg, t0, sig):
+            return single_exp_model(
+                t, a, tau, bg, t0, sig,
+                period_ns=period_ns, n_wraps=n_wraps,
+            )
+
+        p0 = [init["alpha"], init["tau"], init["background"], t0_ns, irf_sigma_ns]
+        lo = [0.0, 0.05, 0.0, float(bin_ns[0]), 0.01]
+        hi = [np.inf, 20.0, np.inf, float(bin_ns[-1]), 2.0]
+
+    try:
+        popt, _ = curve_fit(
+            _model,
+            t_fit,
+            y_fit,
+            p0=p0,
+            bounds=(lo, hi),
+            sigma=sigma_fit,
+            absolute_sigma=False,
+            maxfev=5000,
+        )
+        success = True
+        message = "ok"
+    except Exception as exc:  # noqa: BLE001
+        popt = np.asarray(p0, dtype=np.float64)
+        success = False
+        message = f"curve_fit failed: {exc}"
+
+    if fix_t0 and fix_sigma:
+        alpha, tau, background = popt
+        t0_final, sigma_final = t0_ns, irf_sigma_ns
+    elif fix_sigma:
+        alpha, tau, background, t0_final = popt
+        sigma_final = irf_sigma_ns
+    else:
+        alpha, tau, background, t0_final, sigma_final = popt
+
+    model_full = single_exp_model(
+        bin_ns, alpha, tau, background, t0_final, sigma_final,
+        period_ns=period_ns, n_wraps=n_wraps,
+    )
+    residuals_full = histogram - model_full
+    residuals_weighted_fit = residuals_full[fit_mask] / sigma_fit
+    dof = max(int(fit_mask.sum()) - len(popt), 1)
+    chi2_reduced = float(np.sum(residuals_weighted_fit**2) / dof)
+
+    return SingleExpFit(
+        alpha=float(alpha),
+        tau=float(tau),
+        background=float(background),
+        t0=float(t0_final),
+        sigma=float(sigma_final),
+        chi2_reduced=chi2_reduced,
+        residuals=residuals_full,
+        residuals_weighted=residuals_weighted_fit,
+        model=model_full,
+        fit_mask=fit_mask,
+        n_photons=n_photons,
+        success=success,
+        message=message,
+    )
+
+
+# Convenience union for downstream code
+LifetimeFit = SingleExpFit | DoubleExpFit
+
+
+def fit_information_criteria(fit: LifetimeFit, n_params: int) -> dict[str, float]:
+    """Compute Akaike (AIC) and Bayesian (BIC) information criteria for a fit.
+
+    Uses the Gaussian (Neyman χ²) approximation:
+
+        −2·log L ≈ Σᵢ ((hᵢ − mᵢ) / σᵢ)²
+
+    so that ``AIC = 2k + Σ(weighted residuals²)`` and
+    ``BIC = k·ln(n) + Σ(weighted residuals²)``. Lower is better; the
+    *difference* between two models is what's interpretable.
+    """
+    rss = float(np.sum(fit.residuals_weighted**2))
+    n = int(fit.fit_mask.sum())
+    aic = 2 * n_params + rss
+    bic = n_params * np.log(max(n, 1)) + rss
+    return {"aic": float(aic), "bic": float(bic), "rss": rss, "n": n}

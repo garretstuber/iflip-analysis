@@ -6,7 +6,14 @@ from flipr.io.iflip2 import (
     load_iflip2,
     match_iflip2_to_session,
 )
-from flipr.io.session_csv import SessionData, list_sessions, load_session
+from flipr.io.session_csv import (
+    AcquisitionEntry,
+    SessionData,
+    discover_acquisitions,
+    list_sessions,
+    load_session,
+    session_from_tcspc_source,
+)
 from flipr.io.tidy_csv import (
     TidyData,
     list_tidy_files,
@@ -15,9 +22,11 @@ from flipr.io.tidy_csv import (
 )
 
 __all__ = [
+    "AcquisitionEntry",
     "IFlip2File",
     "SessionData",
     "TidyData",
+    "discover_acquisitions",
     "list_iflip2_files",
     "list_sessions",
     "list_tidy_files",
@@ -26,4 +35,5 @@ __all__ = [
     "load_tidy",
     "match_iflip2_to_session",
     "match_tidy_to_session",
+    "session_from_tcspc_source",
 ]

@@ -21,23 +21,42 @@ import streamlit as st
 from flipr.align.peth import build_peth
 from flipr.io.iflip2 import (
     IFlip2File,
-    list_iflip2_files,
     load_iflip2,
-    match_iflip2_to_session,
 )
-from flipr.io.session_csv import SessionData, list_sessions, load_session
+from flipr.io.session_csv import (
+    AcquisitionEntry,
+    SessionData,
+    discover_acquisitions,
+    load_session,
+    session_from_tcspc_source,
+)
 from flipr.io.tidy_csv import (
     TidyData,
-    list_tidy_files,
     load_tidy,
-    match_tidy_to_session,
+)
+from flipr.preprocess.background import (
+    BackgroundEstimate,
+    compute_background,
+    subtract_background,
 )
 from flipr.preprocess.filters import FILTER_MODES, filtered_session
-from flipr.preprocess.lifetime import DoubleExpFit, fit_double_exp
+from flipr.preprocess.lifetime import (
+    DoubleExpFit,
+    LifetimeFit,
+    SingleExpFit,
+    fit_double_exp,
+    fit_information_criteria,
+    fit_single_exp,
+)
 from flipr.preprocess.motion import QCResult, compute_qc
 from flipr.preprocess.phasor import phasor_from_histogram, phasor_series_from_tcspc
+from flipr.preprocess.sliding_tau import (
+    SlidingTauResult,
+    sliding_tau,
+)
 from flipr.viz.peth import peth_figure
 from flipr.viz.phasor import phasor_plot_figure
+from flipr.viz.sliding_tau import sliding_tau_figure
 from flipr.viz.tcspc import fit_params_table, tcspc_decay_figure
 from flipr.viz.traces import session_traces_figure
 
@@ -79,7 +98,7 @@ def cached_load_iflip2(path: str) -> IFlip2File:
 
 
 @st.cache_data(show_spinner="Fitting double-exponential…")
-def cached_fit(
+def cached_fit_double(
     tcspc: np.ndarray,
     bins: np.ndarray,
     irf_sigma: float,
@@ -97,6 +116,99 @@ def cached_fit(
     )
 
 
+@st.cache_data(show_spinner="Fitting single-exponential…")
+def cached_fit_single(
+    tcspc: np.ndarray,
+    bins: np.ndarray,
+    irf_sigma: float,
+    t0: float,
+    fit_start: float,
+    fit_stop: float,
+) -> SingleExpFit:
+    return fit_single_exp(
+        tcspc,
+        bins,
+        irf_sigma_ns=irf_sigma,
+        t0_ns=t0,
+        fit_start_ns=fit_start,
+        fit_stop_ns=fit_stop,
+    )
+
+
+@st.cache_data(show_spinner="Computing background…")
+def cached_compute_background(
+    tcspc: np.ndarray,
+    bins_ns: np.ndarray,
+    *,
+    time_index: np.ndarray | None = None,
+    time_window: tuple[float, float] | None = None,
+    source_label: str = "background",
+) -> BackgroundEstimate:
+    return compute_background(
+        tcspc, bins_ns,
+        time_index=time_index,
+        time_window=time_window,
+        source_label=source_label,
+    )
+
+
+@st.cache_data(show_spinner="Sliding-window τ…")
+def cached_sliding_tau(
+    tcspc: np.ndarray,
+    bins_ns: np.ndarray,
+    fs: float,
+    *,
+    method: str,
+    window_s: float,
+    step_s: float,
+    period_ns: float,
+    bg_per_frame: np.ndarray | None,
+    bg_scale: float,
+    irf_sigma_ns: float,
+    t0_ns: float,
+    fit_start_ns: float,
+    fit_stop_ns: float,
+) -> SlidingTauResult:
+    bg: BackgroundEstimate | None = None
+    if bg_per_frame is not None:
+        bg = BackgroundEstimate(
+            per_frame=bg_per_frame,
+            bins_ns=bins_ns,
+            n_frames=1,  # informational only
+            source_label="cached",
+        )
+    fit_kwargs = {
+        "irf_sigma_ns": irf_sigma_ns,
+        "t0_ns": t0_ns,
+        "fit_start_ns": fit_start_ns,
+        "fit_stop_ns": fit_stop_ns,
+    }
+    return sliding_tau(
+        tcspc, bins_ns, fs,
+        method=method,  # type: ignore[arg-type]
+        window_s=window_s,
+        step_s=step_s,
+        period_ns=period_ns,
+        background=bg,
+        bg_scale=bg_scale,
+        fit_kwargs=fit_kwargs,
+    )
+
+
+def _cached_fit(
+    model: str,
+    tcspc: np.ndarray,
+    bins: np.ndarray,
+    irf_sigma: float,
+    t0: float,
+    fit_start: float,
+    fit_stop: float,
+) -> LifetimeFit:
+    if model == "single":
+        return cached_fit_single(tcspc, bins, irf_sigma, t0, fit_start, fit_stop)
+    return cached_fit_double(tcspc, bins, irf_sigma, t0, fit_start, fit_stop)
+
+
 @st.cache_data(show_spinner="Computing phasor trajectory…")
 def cached_phasor_series(
     tcspc: np.ndarray,
@@ -106,16 +218,15 @@ def cached_phasor_series(
     return phasor_series_from_tcspc(tcspc, bins, period_ns=period_ns)
 
 
-@st.cache_data(show_spinner="Computing QC metrics…")
-def cached_qc(
-    session_path: str,
+def _compute_qc_for_session(
+    session: SessionData,
     filter_mode: str,
     window_s: float,
     polyorder: int,
     motion_window_s: float,
     motion_corr_threshold: float,
 ) -> QCResult:
-    session = cached_load_session(session_path)
+    """Compute QC metrics from a (possibly synthetic) SessionData."""
     filt = filtered_session(
         session,
         mode=filter_mode,
@@ -147,6 +258,235 @@ class SidebarState:
     filter_polyorder: int
     qc_motion_window_s: float
     qc_motion_corr_threshold: float
+    background: BackgroundEstimate | None = None
+    bg_scale: float = 1.0
+
+
+def _background_picker(
+    container,
+    acquisitions: list[AcquisitionEntry],
+    current: AcquisitionEntry,
+    tcspc_source: TCSPCSource | None,
+) -> tuple[BackgroundEstimate | None, float]:
+    """Sidebar UI for picking a background source.
+
+    Returns ``(background, scale)`` where ``background`` is None when
+    the feature is off. The scale lets the user compensate for
+    differences in laser power/coupling between bg and test recordings.
+    """
+    with container.expander("Background subtraction", expanded=False):
+        st.caption(
+            "Subtract autofluorescence + dark counts from TCSPC histograms "
+            "before fitting / phasor / sliding-τ. Pick a bg acquisition or "
+            "use a quiet pre-stimulus window of the current recording."
+        )
+        mode = st.radio(
+            "bg source",
+            options=["off", "another acquisition", "current acquisition window"],
+            index=0,
+            key="bg_mode",
+            help="**off**: no subtraction. "
+            "**another acquisition**: load a separate (typically `bg*`) "
+            "recording and subtract its mean per-frame histogram. "
+            "**current acquisition window**: derive the bg from a "
+            "user-defined time window of the loaded session.",
+        )
+        bg: BackgroundEstimate | None = None
+
+        if mode == "another acquisition":
+            # Prefer entries with "bg" in the name, then everything else
+            candidates = [a for a in acquisitions if a.blockname != current.blockname
+                          and (a.iflip2_path is not None or a.tidy_data_path is not None)]
+            if not candidates:
+                st.warning("No other acquisitions available.")
+            else:
+                # Sort: bg* first, then alphabetical
+                bg_first = sorted(
+                    candidates,
+                    key=lambda a: (0 if "bg" in a.blockname.lower() else 1, a.blockname),
+                )
+                names = [a.blockname for a in bg_first]
+                idx = st.selectbox(
+                    "bg acquisition",
+                    options=range(len(bg_first)),
+                    format_func=lambda i: names[i] + (
+                        " (bg)" if "bg" in names[i].lower() else ""
+                    ),
+                    index=0,
+                )
+                chosen = bg_first[idx]
+                try:
+                    if chosen.iflip2_path is not None:
+                        bg_src: TCSPCSource = cached_load_iflip2(str(chosen.iflip2_path))
+                    elif chosen.tidy_data_path is not None:
+                        bg_src = cached_load_tidy(str(chosen.tidy_data_path))
+                    else:
+                        bg_src = None  # type: ignore[assignment]
+                    if bg_src is not None:
+                        bg = cached_compute_background(
+                            bg_src.tcspc.astype(np.float64),
+                            bg_src.tcspc_bins_ns,
+                            source_label=chosen.blockname,
+                        )
+                        st.caption(
+                            f"Loaded `{chosen.blockname}` "
+                            f"({bg.n_frames} frames, "
+                            f"{bg.total_per_frame:.1f} photons/frame avg)."
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Failed to load bg: {exc}")
+
+        elif mode == "current acquisition window":
+            if tcspc_source is None:
+                st.warning("Need a TCSPC source loaded first.")
+            else:
+                t_max = float(tcspc_source.streams["time"].max())
+                bg_window = st.slider(
+                    "bg time window (s)",
+                    min_value=0.0,
+                    max_value=t_max,
+                    value=(0.0, min(5.0, t_max)),
+                    step=0.5,
+                    key="bg_window",
+                    help="Use a quiet pre-stimulus stretch of the current "
+                    "recording as the background reference.",
+                )
+                try:
+                    bg = cached_compute_background(
+                        tcspc_source.tcspc.astype(np.float64),
+                        tcspc_source.tcspc_bins_ns,
+                        time_index=tcspc_source.streams["time"].to_numpy(),
+                        time_window=tuple(bg_window),
+                        source_label=f"{current.blockname} t∈[{bg_window[0]:.1f},{bg_window[1]:.1f}]s",
+                    )
+                    st.caption(f"{bg.n_frames} frames averaged.")
+                except Exception as exc:  # noqa: BLE001
+                    st.error(f"Failed to compute bg: {exc}")
+
+        scale = 1.0
+        if bg is not None:
+            scale = float(
+                st.number_input(
+                    "scale",
+                    min_value=0.0,
+                    max_value=10.0,
+                    value=1.0,
+                    step=0.05,
+                    key="bg_scale",
+                    help="Multiplier on the subtracted bg. Use 1.0 if the "
+                    "bg recording was at matched laser power and fiber "
+                    "coupling.",
+                )
+            )
+
+    return bg, scale
+
+
+def _load_custom_file(path_str: str, empty_state: SidebarState) -> SidebarState:
+    """Load a single tidy CSV or .iFLiP2 file by absolute path and build a
+    minimal SessionData around it. Bypasses the data root / discovery flow.
+
+    Returns a fully-populated :class:`SidebarState` ready to feed the tabs,
+    or ``empty_state`` (with an error in the sidebar) on failure.
+    """
+    path = Path(path_str).expanduser()
+    if not path.is_file():
+        st.sidebar.error(f"File not found: {path}")
+        return empty_state
+
+    name = path.name.lower()
+    tcspc_source: TCSPCSource | None = None
+    tcspc_source_label = ""
+    try:
+        if name.endswith(".iflip2"):
+            tcspc_source = cached_load_iflip2(str(path))
+            tcspc_source_label = f"raw · {path.name}"
+        elif name.endswith("_data.csv"):
+            tcspc_source = cached_load_tidy(str(path))
+            tcspc_source_label = f"tidy · {path.name}"
+        elif name.endswith(".csv"):
+            # Try as a tidy data CSV anyway (will error if it's not)
+            tcspc_source = cached_load_tidy(str(path))
+            tcspc_source_label = f"tidy · {path.name}"
+        else:
+            st.sidebar.error(
+                f"Unsupported file type: {path.name}. "
+                "Expected .iFLiP2 or *_data.csv."
+            )
+            return empty_state
+    except Exception as exc:  # noqa: BLE001
+        st.sidebar.error(f"Failed to load `{path.name}`: {exc}")
+        return empty_state
+
+    # Build a minimal SessionData around the source
+    try:
+        # Strip filename → blockname guess
+        from flipr.io.session_csv import _blockname_from_iflip2, _blockname_from_tidy
+
+        bn_guess = _blockname_from_tidy(path.name) or _blockname_from_iflip2(path.name)
+        session_raw = session_from_tcspc_source(tcspc_source, blockname=bn_guess)
+    except Exception as exc:  # noqa: BLE001
+        st.sidebar.error(f"Failed to build session: {exc}")
+        return empty_state
+
+    st.sidebar.success(f"Loaded custom file: `{path.name}`")
+    st.sidebar.caption(f"Blockname: `{session_raw.blockname}`")
+
+    # Filter controls (same UI as the discovery flow)
+    st.sidebar.divider()
+    st.sidebar.markdown("**Stream filter**")
+    filter_mode = st.sidebar.selectbox(
+        "filter mode",
+        options=list(FILTER_MODES),
+        index=0,
+        key="filter_mode",
+    )
+    if filter_mode == "none":
+        window_s = 0.25
+        polyorder = 2
+    else:
+        window_s = st.sidebar.number_input(
+            "window (s)",
+            min_value=0.05,
+            max_value=10.0,
+            value=0.25,
+            step=0.05,
+            key="filter_window",
+        )
+        if filter_mode == "savgol":
+            polyorder = int(
+                st.sidebar.number_input(
+                    "polyorder",
+                    min_value=1,
+                    max_value=5,
+                    value=2,
+                    step=1,
+                    key="filter_polyorder",
+                )
+            )
+        else:
+            polyorder = 2
+
+    session = filtered_session(
+        session_raw,
+        mode=filter_mode,  # type: ignore[arg-type]
+        window_s=float(window_s),
+        polyorder=int(polyorder),
+    )
+
+    return SidebarState(
+        data_root=path.parent,
+        session_raw=session_raw,
+        session=session,
+        session_path=None,
+        tcspc_source=tcspc_source,
+        tcspc_source_label=tcspc_source_label,
+        filter_mode=str(filter_mode),
+        filter_window_s=float(window_s),
+        filter_polyorder=int(polyorder),
+        qc_motion_window_s=1.0,
+        qc_motion_corr_threshold=0.85,
+    )
 
 
 def sidebar() -> SidebarState:
@@ -174,55 +514,103 @@ def sidebar() -> SidebarState:
     data_root_str = st.sidebar.text_input(
         "Data root",
         value=default,
-        help="Directory containing tidy/ and sessions/ subfolders",
+        help="Directory containing tidy/, raw/, and/or sessions/ subfolders",
     )
+
+    # --- Custom file picker (load any file by absolute path) ---
+    with st.sidebar.expander("Load file directly", expanded=False):
+        st.caption(
+            "Load a single tidy `*_data.csv` or `.iFLiP2` file by absolute "
+            "path (bypasses the data root and dropdown). Useful for "
+            "one-off files outside your usual data folder."
+        )
+        custom_path_str = st.text_input(
+            "File path",
+            value="",
+            placeholder="/path/to/file.iFLiP2 or /path/to/file_data.csv",
+            key="custom_file_path",
+        )
+        # File uploader as alternate UX (limited to small files)
+        uploaded = st.file_uploader(
+            "…or drop a file",
+            type=["iFLiP2", "iflip2", "csv"],
+            help=(
+                "Drop a `.iFLiP2` file or a tidy `_data.csv` file. "
+                "For tidy CSVs, the matching `_param.csv` must live "
+                "in the same folder as the data file (so prefer the "
+                "path text box above for tidy CSVs)."
+            ),
+            key="custom_uploader",
+        )
+        if uploaded is not None and not custom_path_str:
+            # Persist the upload to a temp path so loaders can read it
+            import tempfile
+
+            tmp = Path(tempfile.gettempdir()) / uploaded.name
+            tmp.write_bytes(uploaded.getvalue())
+            custom_path_str = str(tmp)
+            st.caption(f"Saved upload to `{tmp}` (will be reloaded if you re-run).")
+
+    if custom_path_str:
+        return _load_custom_file(custom_path_str, empty_state)
+
     if not data_root_str:
-        st.sidebar.warning("Enter a FLIPR data root to begin.")
+        st.sidebar.warning("Enter a FLIPR data root or load a file directly.")
         return empty_state
     data_root = Path(data_root_str).expanduser()
     if not data_root.is_dir():
         st.sidebar.error(f"Not a directory: {data_root}")
         return empty_state
 
-    sessions = list_sessions(data_root)
-    if not sessions:
-        st.sidebar.warning(f"No sessions/ folder found under {data_root}.")
+    # Unified discovery across sessions/, tidy/, and raw/
+    acquisitions = discover_acquisitions(data_root)
+    if not acquisitions:
+        st.sidebar.warning(
+            f"No acquisitions found under {data_root}. "
+            "Expected tidy/*_data.csv, raw/*.iFLiP2, or sessions/<block>/ folders."
+        )
         return replace(empty_state, data_root=data_root)
 
-    session_names = [p.name for p in sessions]
-    picked_name = st.sidebar.selectbox("Session", session_names, index=len(sessions) - 1)
-    picked_path = next(p for p in sessions if p.name == picked_name)
+    # Show a label hint for each entry
+    acq_labels = []
+    for a in acquisitions:
+        parts = []
+        if a.has_session:
+            parts.append("session")
+        if a.iflip2_path is not None:
+            parts.append("raw")
+        if a.tidy_data_path is not None:
+            parts.append("tidy")
+        acq_labels.append(f"{a.blockname}  ({', '.join(parts)})")
 
-    try:
-        session_raw = cached_load_session(str(picked_path))
-    except Exception as exc:  # noqa: BLE001
-        st.sidebar.error(f"Failed to load session: {exc}")
-        return replace(empty_state, data_root=data_root)
+    picked_idx = st.sidebar.selectbox(
+        "Acquisition",
+        options=range(len(acquisitions)),
+        format_func=lambda i: acq_labels[i],
+        index=len(acquisitions) - 1,
+    )
+    picked: AcquisitionEntry = acquisitions[picked_idx]
 
-    # Find TCSPC sources: the raw .iFLiP2 (if present) is byte-exact,
-    # the tidy CSV is the exported form. Prefer iFLiP2 when both exist
-    # but let the user override in the UI.
-    iflip2_files = list_iflip2_files(data_root)
-    tidy_files = list_tidy_files(data_root)
-    iflip2_match = match_iflip2_to_session(iflip2_files, session_raw.blockname)
-    tidy_match = match_tidy_to_session(tidy_files, session_raw.blockname)
-
-    # Decide which options are available
-    source_options: list[str] = []
-    if iflip2_match is not None:
-        source_options.append("raw .iFLiP2")
-    if tidy_match is not None:
-        source_options.append("tidy CSV")
-
+    # --- Load or build the SessionData ---
+    session_raw: SessionData | None = None
+    session_path: Path | None = None
     tcspc_source: TCSPCSource | None = None
     tcspc_source_label: str = ""
+
+    # Determine available TCSPC sources
+    source_options: list[str] = []
+    if picked.iflip2_path is not None:
+        source_options.append("raw .iFLiP2")
+    if picked.tidy_data_path is not None:
+        source_options.append("tidy CSV")
+
+    # Choose TCSPC source
     if not source_options:
         st.sidebar.warning(
-            "No matching raw/ or tidy/ file for this session — Interval "
-            "Inspector, Phasor, and QC are disabled."
+            "No matching raw/ or tidy/ file for this acquisition — "
+            "Interval Inspector, Phasor, and QC are disabled."
         )
     else:
-        # Default to iFLiP2 if present (source of truth)
         default_idx = 0
         chosen = st.sidebar.radio(
             "TCSPC source",
@@ -233,17 +621,44 @@ def sidebar() -> SidebarState:
             "export of the same data. Use raw when available.",
         )
         try:
-            if chosen == "raw .iFLiP2" and iflip2_match is not None:
-                tcspc_source = cached_load_iflip2(str(iflip2_match))
-                tcspc_source_label = f"raw · {iflip2_match.name}"
-                st.sidebar.caption(f"Raw file: `{iflip2_match.name}`")
-            elif chosen == "tidy CSV" and tidy_match is not None:
-                tcspc_source = cached_load_tidy(str(tidy_match))
-                tcspc_source_label = f"tidy · {tidy_match.name}"
-                st.sidebar.caption(f"Tidy file: `{tidy_match.name}`")
+            if chosen == "raw .iFLiP2" and picked.iflip2_path is not None:
+                tcspc_source = cached_load_iflip2(str(picked.iflip2_path))
+                tcspc_source_label = f"raw · {picked.iflip2_path.name}"
+                st.sidebar.caption(f"Raw file: `{picked.iflip2_path.name}`")
+            elif chosen == "tidy CSV" and picked.tidy_data_path is not None:
+                tcspc_source = cached_load_tidy(str(picked.tidy_data_path))
+                tcspc_source_label = f"tidy · {picked.tidy_data_path.name}"
+                st.sidebar.caption(f"Tidy file: `{picked.tidy_data_path.name}`")
         except Exception as exc:  # noqa: BLE001
             st.sidebar.error(f"Failed to load {chosen}: {exc}")
             tcspc_source = None
+
+    # Load or build the SessionData
+    if picked.has_session and picked.session_path is not None:
+        # Full session folder available
+        session_path = picked.session_path
+        try:
+            session_raw = cached_load_session(str(session_path))
+        except Exception as exc:  # noqa: BLE001
+            st.sidebar.error(f"Failed to load session: {exc}")
+            return replace(empty_state, data_root=data_root)
+    elif tcspc_source is not None:
+        # No session folder — build a minimal SessionData from the TCSPC source
+        try:
+            session_raw = session_from_tcspc_source(tcspc_source, blockname=picked.blockname)
+            session_path = None
+        except Exception as exc:  # noqa: BLE001
+            st.sidebar.error(f"Failed to build session from TCSPC source: {exc}")
+            return replace(empty_state, data_root=data_root)
+    else:
+        st.sidebar.error("No loadable data for this acquisition.")
+        return replace(empty_state, data_root=data_root)
+
+    # --- Background subtraction (optional) ---
+    st.sidebar.divider()
+    background, bg_scale = _background_picker(
+        st.sidebar, acquisitions, picked, tcspc_source
+    )
 
     # --- Filter controls (global) ---
     st.sidebar.divider()
@@ -317,17 +732,19 @@ def sidebar() -> SidebarState:
 
     # Session metadata block
     with st.sidebar.expander("Session metadata", expanded=False):
-        st.write(
-            {
-                "subject": session_raw.subject,
-                "procedure": session_raw.procedure,
-                "fs (Hz)": session_raw.fs,
-                "blockname": session_raw.blockname,
-                "duration (s)": float(session_raw.streams["time"].max()),
-                "n samples": int(len(session_raw.streams)),
-                "event types": session_raw.event_types,
-            }
-        )
+        meta_dict: dict[str, object] = {
+            "subject": session_raw.subject,
+            "procedure": session_raw.procedure,
+            "fs (Hz)": session_raw.fs,
+            "blockname": session_raw.blockname,
+            "duration (s)": float(session_raw.streams["time"].max()),
+            "n samples": int(len(session_raw.streams)),
+        }
+        if session_raw.event_types:
+            meta_dict["event types"] = session_raw.event_types
+        if not picked.has_session:
+            meta_dict["source"] = "tidy/raw only (no session folder)"
+        st.write(meta_dict)
         note = session_raw.meta.get("note_general", "")
         if note and note != "NA":
             st.caption(f"Note: {note}")
@@ -336,7 +753,7 @@ def sidebar() -> SidebarState:
         data_root=data_root,
         session_raw=session_raw,
         session=session,
-        session_path=picked_path,
+        session_path=session_path,
         tcspc_source=tcspc_source,
         tcspc_source_label=tcspc_source_label,
         filter_mode=str(filter_mode),
@@ -344,6 +761,8 @@ def sidebar() -> SidebarState:
         filter_polyorder=int(polyorder),
         qc_motion_window_s=float(qc_motion_window_s),
         qc_motion_corr_threshold=float(qc_motion_corr_threshold),
+        background=background,
+        bg_scale=float(bg_scale),
     )
 
 
@@ -481,21 +900,28 @@ def render_overview(
             st.plotly_chart(corr_fig, use_container_width=True)
 
     # Per-event count summary
-    with st.expander("event counts"):
-        ev_df = (
-            session.events.groupby("event_id_char")
-            .size()
-            .rename("count")
-            .reset_index()
-            .rename(columns={"event_id_char": "event"})
-        )
-        st.dataframe(ev_df, hide_index=True, use_container_width=False)
+    if session.event_types:
+        with st.expander("event counts"):
+            ev_df = (
+                session.events.groupby("event_id_char")
+                .size()
+                .rename("count")
+                .reset_index()
+                .rename(columns={"event_id_char": "event"})
+            )
+            st.dataframe(ev_df, hide_index=True, use_container_width=False)
 
 
 # -----------------------------------------------------------------------------
 # Tab 2: Interval inspector
 # -----------------------------------------------------------------------------
-def render_interval(session: SessionData, tidy: TCSPCSource) -> None:
+def render_interval(
+    session: SessionData,
+    tidy: TCSPCSource,
+    *,
+    background: BackgroundEstimate | None = None,
+    bg_scale: float = 1.0,
+) -> None:
     st.subheader("Interval inspector")
     st.caption(
         "Sum TCSPC histograms across a user-selected time window and re-fit "
@@ -523,16 +949,58 @@ def render_interval(session: SessionData, tidy: TCSPCSource) -> None:
         st.error("window end must exceed window start")
         return
 
-    hist = tidy.integrate_histogram(t0_window, t1_window).astype(np.float64)
-    if hist.sum() == 0:
+    hist_raw = tidy.integrate_histogram(t0_window, t1_window).astype(np.float64)
+    if hist_raw.sum() == 0:
         st.error("no photons in the selected window")
         return t_range
+
+    # Apply background subtraction (if enabled)
+    if background is not None:
+        # n_frames in the window = duration * fs
+        t_axis = tidy.streams["time"].to_numpy()
+        n_frames_window = int(((t_axis >= t0_window) & (t_axis <= t1_window)).sum())
+        hist = subtract_background(
+            hist_raw, background, n_frames=n_frames_window, scale=bg_scale
+        )
+        bg_subtracted_total = float(
+            bg_scale * n_frames_window * background.per_frame.sum()
+        )
+        st.caption(
+            f"Background subtraction: source `{background.source_label}` × "
+            f"{n_frames_window} frames × {bg_scale:.2f} = "
+            f"{bg_subtracted_total:,.0f} photons removed"
+        )
+    else:
+        hist = hist_raw
 
     # Fit params default to the session's meta
     default_irf = float(session.meta.get("IRF", "0.212"))
     default_t0 = float(session.meta.get("t0", "1.012"))
     default_start = float(tidy.params.get("header_state_spcrangelow", "0.4"))
     default_stop = float(tidy.params.get("header_state_spcrangehigh", "12.3"))
+
+    fit_col1, fit_col2 = st.columns([1, 3])
+    with fit_col1:
+        fit_model = st.radio(
+            "fit model",
+            options=["double", "single"],
+            index=0,
+            horizontal=True,
+            help=(
+                "**double** = sum of two EMG components (slow + fast). "
+                "Standard for FLIM-DA0.5 and most FLIM biosensors. "
+                "**single** = one EMG component. Use for reference dyes "
+                "or as a null model for AIC/BIC comparison."
+            ),
+            key="fit_model",
+        )
+    with fit_col2:
+        compare_models = st.checkbox(
+            "compare to alternative model (AIC/BIC)",
+            value=False,
+            help="Fit both single and double exp and report AIC/BIC and ΔAIC. "
+            "ΔAIC > ~10 in favour of one model is decisive.",
+        )
 
     with st.expander("fit settings", expanded=False):
         c1, c2, c3, c4 = st.columns(4)
@@ -547,11 +1015,56 @@ def render_interval(session: SessionData, tidy: TCSPCSource) -> None:
             "fit stop (ns)", value=default_stop, min_value=1.0, max_value=12.5, step=0.1
         )
 
-    fit = cached_fit(hist, tidy.tcspc_bins_ns, irf, t0, fit_lo, fit_hi)
+    fit = _cached_fit(fit_model, hist, tidy.tcspc_bins_ns, irf, t0, fit_lo, fit_hi)
 
-    title = f"window: t ∈ [{t0_window:.2f}, {t1_window:.2f}] s   ·   {int(hist.sum()):,} photons"
+    title = (
+        f"window: t ∈ [{t0_window:.2f}, {t1_window:.2f}] s   ·   "
+        f"{int(hist.sum()):,} photons   ·   {fit_model}-exp fit"
+    )
     fig = tcspc_decay_figure(hist, tidy.tcspc_bins_ns, fit=fit, log_y=True, title=title, height=560)
     st.plotly_chart(fig, use_container_width=True)
+
+    # Optional AIC/BIC comparison row
+    if compare_models:
+        alt_model = "single" if fit_model == "double" else "double"
+        alt_fit = _cached_fit(alt_model, hist, tidy.tcspc_bins_ns, irf, t0, fit_lo, fit_hi)
+        # n_params: single has 3 free params (α, τ, bg) when t0/σ fixed,
+        # double has 5 (α1, τ1, α2, τ2, bg).
+        n_params_main = 3 if fit_model == "single" else 5
+        n_params_alt = 3 if alt_model == "single" else 5
+        ic_main = fit_information_criteria(fit, n_params_main)
+        ic_alt = fit_information_criteria(alt_fit, n_params_alt)
+        delta_aic = ic_main["aic"] - ic_alt["aic"]
+        delta_bic = ic_main["bic"] - ic_alt["bic"]
+        st.markdown("**Model comparison**")
+        comp_cols = st.columns(5)
+        comp_cols[0].metric(f"AIC ({fit_model})", f"{ic_main['aic']:.1f}")
+        comp_cols[1].metric(f"AIC ({alt_model})", f"{ic_alt['aic']:.1f}")
+        comp_cols[2].metric(
+            "ΔAIC",
+            f"{delta_aic:+.1f}",
+            help=f"AIC({fit_model}) − AIC({alt_model}). Negative → {fit_model} preferred.",
+        )
+        comp_cols[3].metric(f"χ² ({fit_model})", f"{fit.chi2_reduced:.2f}")
+        comp_cols[4].metric(f"χ² ({alt_model})", f"{alt_fit.chi2_reduced:.2f}")
+        if abs(delta_aic) >= 10:
+            preferred = fit_model if delta_aic < 0 else alt_model
+            st.success(
+                f"AIC strongly prefers the **{preferred}-exponential** model "
+                f"(|ΔAIC| = {abs(delta_aic):.1f} ≥ 10)."
+            )
+        elif abs(delta_aic) >= 2:
+            preferred = fit_model if delta_aic < 0 else alt_model
+            st.info(
+                f"AIC mildly favours the **{preferred}-exponential** model "
+                f"(|ΔAIC| = {abs(delta_aic):.1f}). Inspect residuals before deciding."
+            )
+        else:
+            st.info(
+                f"AIC is inconclusive between models (|ΔAIC| = {abs(delta_aic):.1f} < 2). "
+                "Both models fit the data comparably well; prefer the simpler one."
+            )
+        st.caption(f"ΔBIC = {delta_bic:+.1f} (lower magnitude needed to swap models than AIC).")
 
     # Fit parameters table + header comparison
     pc1, pc2 = st.columns([2, 1])
@@ -598,6 +1111,9 @@ def render_phasor(
     session: SessionData,
     tidy: TCSPCSource,
     interval_range: tuple[float, float] | None = None,
+    *,
+    background: BackgroundEstimate | None = None,
+    bg_scale: float = 1.0,
 ) -> None:
     st.subheader("Phasor explorer")
     st.caption(
@@ -634,9 +1150,20 @@ def render_phasor(
     with col_c:
         show_window = st.toggle("mark selected window", value=True, disabled=interval_range is None)
 
-    # Full-session phasor trajectory
+    # Full-session phasor trajectory. If a background is set, subtract it
+    # from each frame before computing per-frame phasor coordinates.
+    tcspc_for_phasor = tidy.tcspc.astype(np.float64)
+    if background is not None:
+        from flipr.preprocess.background import subtract_background_per_frame
+
+        tcspc_for_phasor = subtract_background_per_frame(
+            tcspc_for_phasor, background, scale=bg_scale
+        )
+        st.caption(
+            f"Per-frame bg subtracted (`{background.source_label}` × {bg_scale:.2f})."
+        )
     real, imag, mean, freq = cached_phasor_series(
-        tidy.tcspc.astype(np.float64), tidy.tcspc_bins_ns, period_ns
+        tcspc_for_phasor, tidy.tcspc_bins_ns, period_ns
     )
 
     # Colour array + hover
@@ -668,6 +1195,14 @@ def render_phasor(
     highlight_point: tuple[float, float] | None = None
     if show_window and interval_range is not None:
         window_hist = tidy.integrate_histogram(*interval_range).astype(np.float64)
+        if background is not None:
+            t_axis_full = tidy.streams["time"].to_numpy()
+            n_frames_window = int(
+                ((t_axis_full >= interval_range[0]) & (t_axis_full <= interval_range[1])).sum()
+            )
+            window_hist = subtract_background(
+                window_hist, background, n_frames=n_frames_window, scale=bg_scale
+            )
         win = phasor_from_histogram(window_hist, tidy.tcspc_bins_ns, period_ns=period_ns)
         if np.isfinite(win.real) and np.isfinite(win.imag):
             highlight_point = (win.real, win.imag)
@@ -832,6 +1367,171 @@ def render_peth(session: SessionData, *, filter_label: str = "raw") -> None:
 
 
 # -----------------------------------------------------------------------------
+# Tab 5: Sliding-window τ
+# -----------------------------------------------------------------------------
+def render_sliding_tau(
+    session: SessionData,
+    tidy: TCSPCSource,
+    *,
+    background: BackgroundEstimate | None = None,
+    bg_scale: float = 1.0,
+) -> None:
+    st.subheader("Sliding-window τ")
+    st.caption(
+        "Sweep a fixed-width window across the session and compute one "
+        "lifetime per step. Phasor methods are fast (live recompute on "
+        "parameter change). Fit methods are accurate but slow — pick a "
+        "coarse step (≥1 s) when fitting."
+    )
+
+    method_label_map = {
+        "phasor_phase": "phasor · τ_phase (fast)",
+        "phasor_mod": "phasor · τ_modulation (fast)",
+        "fit_double": "fit · double-exp τ_amp (slow)",
+        "fit_single": "fit · single-exp τ (slow)",
+    }
+    cmd_method, cmd_window, cmd_step = st.columns([2, 1, 1])
+    with cmd_method:
+        method = st.selectbox(
+            "method",
+            options=list(method_label_map.keys()),
+            format_func=lambda k: method_label_map[k],
+            index=0,
+            key="sliding_method",
+        )
+    with cmd_window:
+        window_s = st.number_input(
+            "window (s)", min_value=0.1, max_value=60.0, value=1.0, step=0.1,
+            key="sliding_window",
+        )
+    with cmd_step:
+        # Fits are expensive; default step matches window for those.
+        default_step = float(window_s) if str(method).startswith("fit") else max(0.5, float(window_s) / 2)
+        step_s = st.number_input(
+            "step (s)", min_value=0.05, max_value=60.0, value=default_step, step=0.05,
+            key="sliding_step",
+        )
+
+    fit_lo_default = float(tidy.params.get("header_state_spcrangelow", "0.4"))
+    fit_hi_default = float(tidy.params.get("header_state_spcrangehigh", "12.3"))
+    irf_default = float(session.meta.get("IRF", "0.212"))
+    t0_default = float(session.meta.get("t0", "1.012"))
+
+    if str(method).startswith("fit"):
+        with st.expander("fit settings (slower)", expanded=False):
+            fc1, fc2, fc3, fc4 = st.columns(4)
+            irf_default = fc1.number_input(
+                "IRF σ (ns)", value=irf_default, min_value=0.05, max_value=2.0, step=0.01,
+                key="sliding_irf",
+            )
+            t0_default = fc2.number_input(
+                "t₀ (ns)", value=t0_default, min_value=0.0, max_value=5.0, step=0.01,
+                key="sliding_t0",
+            )
+            fit_lo_default = fc3.number_input(
+                "fit start (ns)", value=fit_lo_default, min_value=0.0, max_value=10.0, step=0.1,
+                key="sliding_fit_lo",
+            )
+            fit_hi_default = fc4.number_input(
+                "fit stop (ns)", value=fit_hi_default, min_value=1.0, max_value=12.5, step=0.1,
+                key="sliding_fit_hi",
+            )
+
+    # Compute the trace
+    bin_step = float(tidy.tcspc_bins_ns[1] - tidy.tcspc_bins_ns[0])
+    period_ns = round(bin_step * (int(12.5 / bin_step)), 4)
+
+    fs = float(tidy.params.get("header_state_samplingfreq", "20.0"))
+    if not np.isfinite(fs) or fs <= 0:
+        fs = float(session.fs) if session.fs > 0 else 20.0
+
+    bg_per_frame = background.per_frame if background is not None else None
+
+    try:
+        result = cached_sliding_tau(
+            tidy.tcspc.astype(np.float64),
+            tidy.tcspc_bins_ns,
+            fs,
+            method=str(method),
+            window_s=float(window_s),
+            step_s=float(step_s),
+            period_ns=period_ns,
+            bg_per_frame=bg_per_frame,
+            bg_scale=float(bg_scale),
+            irf_sigma_ns=float(irf_default),
+            t0_ns=float(t0_default),
+            fit_start_ns=float(fit_lo_default),
+            fit_stop_ns=float(fit_hi_default),
+        )
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+
+    if background is not None:
+        st.caption(
+            f"Background: `{background.source_label}` × {bg_scale:.2f} "
+            f"({background.total_per_frame:.1f} photons/frame avg subtracted)."
+        )
+
+    # Event types to overlay
+    ev_types = (
+        st.multiselect(
+            "events to overlay",
+            options=session.event_types,
+            default=session.event_types,
+            key="sliding_events",
+        )
+        if session.event_types
+        else None
+    )
+
+    fig = sliding_tau_figure(
+        result,
+        session=session,
+        event_types=ev_types,
+        show_n_photons=True,
+        height=540,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Summary stats
+    finite = np.isfinite(result.tau)
+    if finite.sum() == 0:
+        st.warning("No finite τ values — check window size, photon counts, or fit settings.")
+        return
+
+    tau_mean = float(np.mean(result.tau[finite]))
+    tau_std = float(np.std(result.tau[finite]))
+    n_steps_total = result.n_steps
+    n_steps_ok = int(finite.sum())
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("n windows", f"{n_steps_total}")
+    mc2.metric("n with finite τ", f"{n_steps_ok}")
+    mc3.metric("mean τ (ns)", f"{tau_mean:.3f}")
+    mc4.metric("τ std (ns)", f"{tau_std:.3f}")
+
+    # Optional CSV download
+    import io
+
+    csv_buf = io.StringIO()
+    df_out = pd.DataFrame(
+        {
+            "time_s": result.time,
+            "tau_ns": result.tau,
+            "n_photons": result.n_photons,
+            **result.extra,
+        }
+    )
+    df_out.to_csv(csv_buf, index=False)
+    st.download_button(
+        "Download trace CSV",
+        data=csv_buf.getvalue(),
+        file_name=f"sliding_tau_{session.blockname}_{method}_w{window_s}s_s{step_s}s.csv",
+        mime="text/csv",
+    )
+
+
+# -----------------------------------------------------------------------------
 # Main
 # -----------------------------------------------------------------------------
 def main() -> None:
@@ -844,7 +1544,11 @@ def main() -> None:
     session_raw = state.session_raw
     tcspc_source = state.tcspc_source
 
-    st.title(f"{session_raw.subject} · {session_raw.blockname}")
+    # Title: show subject if available, otherwise just blockname
+    if session_raw.subject and session_raw.subject != session_raw.blockname:
+        st.title(f"{session_raw.subject} · {session_raw.blockname}")
+    else:
+        st.title(session_raw.blockname)
 
     # Seed the interval_range session state the first time the session loads.
     t_end = float(session_raw.streams["time"].max())
@@ -857,8 +1561,8 @@ def main() -> None:
 
     # QC is computed from the filtered session (user choice propagates)
     try:
-        qc = cached_qc(
-            str(state.session_path),
+        qc = _compute_qc_for_session(
+            session_raw,
             state.filter_mode,
             state.filter_window_s,
             state.filter_polyorder,
@@ -876,11 +1580,12 @@ def main() -> None:
         + (f" · order {state.filter_polyorder}" if state.filter_mode == "savgol" else "")
     )
 
-    tab_overview, tab_interval, tab_phasor, tab_peth = st.tabs(
+    tab_overview, tab_interval, tab_phasor, tab_sliding, tab_peth = st.tabs(
         [
             "Session overview",
             "Interval inspector",
             "Phasor explorer",
+            "Sliding τ",
             "Event PETH",
         ]
     )
@@ -904,7 +1609,12 @@ def main() -> None:
             st.caption(f"TCSPC source: **{state.tcspc_source_label}**")
             # Interval inspector uses the raw session (stream filter is
             # irrelevant; it re-fits TCSPC histograms directly).
-            render_interval(session_raw, tcspc_source)
+            render_interval(
+                session_raw,
+                tcspc_source,
+                background=state.background,
+                bg_scale=state.bg_scale,
+            )
 
     with tab_phasor:
         if tcspc_source is None:
@@ -919,6 +1629,24 @@ def main() -> None:
                 session_raw,
                 tcspc_source,
                 interval_range=st.session_state["interval_range"],
+                background=state.background,
+                bg_scale=state.bg_scale,
+            )
+
+    with tab_sliding:
+        if tcspc_source is None:
+            st.warning(
+                "Sliding τ needs either a raw/\\*.iFLiP2 file or a "
+                "tidy/\\*_data.csv file matching this session (for per-frame "
+                "TCSPC histograms)."
+            )
+        else:
+            st.caption(f"TCSPC source: **{state.tcspc_source_label}**")
+            render_sliding_tau(
+                session_raw,
+                tcspc_source,
+                background=state.background,
+                bg_scale=state.bg_scale,
             )
 
     with tab_peth:
