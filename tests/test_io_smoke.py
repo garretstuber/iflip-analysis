@@ -11,9 +11,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from flipr.io import load_session, load_tidy
-from flipr.io.session_csv import list_sessions
-from flipr.io.tidy_csv import list_tidy_files, match_tidy_to_session
+from iflip.io import load_session, load_tidy
+from iflip.io.session_csv import list_sessions
+from iflip.io.tidy_csv import list_tidy_files, match_tidy_to_session
 
 DATA_ROOT = Path(__file__).resolve().parents[2] / "FLIPR data"
 EXAMPLE_BLOCK = "2026_04_09_acz02"

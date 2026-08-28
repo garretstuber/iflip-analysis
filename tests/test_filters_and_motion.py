@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from flipr.io.session_csv import SessionData, load_session
-from flipr.preprocess.filters import apply_filter, filtered_session
-from flipr.preprocess.motion import (
+from iflip.io.session_csv import SessionData, load_session
+from iflip.preprocess.filters import apply_filter, filtered_session
+from iflip.preprocess.motion import (
     compute_qc,
     detect_intensity_jumps,
     detect_motion_correlation,

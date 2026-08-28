@@ -21,7 +21,7 @@ Two kinds of methods:
   4× the runtime.
 
 Background subtraction (per-window) is applied if a
-:class:`flipr.preprocess.background.BackgroundEstimate` is supplied.
+:class:`iflip.preprocess.background.BackgroundEstimate` is supplied.
 """
 
 from __future__ import annotations
@@ -31,9 +31,9 @@ from typing import Literal
 
 import numpy as np
 
-from flipr.preprocess.background import BackgroundEstimate, subtract_background
-from flipr.preprocess.lifetime import fit_double_exp, fit_single_exp
-from flipr.preprocess.phasor import phasor_from_histogram
+from iflip.preprocess.background import BackgroundEstimate, subtract_background
+from iflip.preprocess.lifetime import fit_double_exp, fit_single_exp
+from iflip.preprocess.phasor import phasor_from_histogram
 
 SlidingMethod = Literal["phasor_phase", "phasor_mod", "fit_double", "fit_single"]
 

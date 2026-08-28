@@ -1,12 +1,12 @@
-"""Streamlit dashboard for FLIPR session QC and inspection.
+"""Streamlit dashboard for iFLIP session QC and inspection.
 
 Run with::
 
-    uv run streamlit run src/flipr/app/streamlit_app.py
+    uv run streamlit run src/iflip/app/streamlit_app.py
 
 Or via the installed console script::
 
-    uv run flipr-app
+    uv run iflip-app
 """
 
 from __future__ import annotations
@@ -18,29 +18,29 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from flipr.align.peth import build_peth
-from flipr.io.iflip2 import (
+from iflip.align.peth import build_peth
+from iflip.io.iflip2 import (
     IFlip2File,
     load_iflip2,
 )
-from flipr.io.session_csv import (
+from iflip.io.session_csv import (
     AcquisitionEntry,
     SessionData,
     discover_acquisitions,
     load_session,
     session_from_tcspc_source,
 )
-from flipr.io.tidy_csv import (
+from iflip.io.tidy_csv import (
     TidyData,
     load_tidy,
 )
-from flipr.preprocess.background import (
+from iflip.preprocess.background import (
     BackgroundEstimate,
     compute_background,
     subtract_background,
 )
-from flipr.preprocess.filters import FILTER_MODES, filtered_session
-from flipr.preprocess.lifetime import (
+from iflip.preprocess.filters import FILTER_MODES, filtered_session
+from iflip.preprocess.lifetime import (
     DoubleExpFit,
     LifetimeFit,
     SingleExpFit,
@@ -48,17 +48,17 @@ from flipr.preprocess.lifetime import (
     fit_information_criteria,
     fit_single_exp,
 )
-from flipr.preprocess.motion import QCResult, compute_qc
-from flipr.preprocess.phasor import phasor_from_histogram, phasor_series_from_tcspc
-from flipr.preprocess.sliding_tau import (
+from iflip.preprocess.motion import QCResult, compute_qc
+from iflip.preprocess.phasor import phasor_from_histogram, phasor_series_from_tcspc
+from iflip.preprocess.sliding_tau import (
     SlidingTauResult,
     sliding_tau,
 )
-from flipr.viz.peth import peth_figure
-from flipr.viz.phasor import phasor_plot_figure
-from flipr.viz.sliding_tau import sliding_tau_figure
-from flipr.viz.tcspc import fit_params_table, tcspc_decay_figure
-from flipr.viz.traces import session_traces_figure
+from iflip.viz.peth import peth_figure
+from iflip.viz.phasor import phasor_plot_figure
+from iflip.viz.sliding_tau import sliding_tau_figure
+from iflip.viz.tcspc import fit_params_table, tcspc_decay_figure
+from iflip.viz.traces import session_traces_figure
 
 LOGO_PATH = Path(__file__).parent / "assets" / "FLIPRlogo.png"
 
@@ -71,7 +71,7 @@ TCSPCSource = TidyData | IFlip2File
 # Config
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="FLIPR analysis",
+    page_title="iFLIP analysis",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -421,7 +421,7 @@ def _load_custom_file(path_str: str, empty_state: SidebarState) -> SidebarState:
     # Build a minimal SessionData around the source
     try:
         # Strip filename → blockname guess
-        from flipr.io.session_csv import _blockname_from_iflip2, _blockname_from_tidy
+        from iflip.io.session_csv import _blockname_from_iflip2, _blockname_from_tidy
 
         bn_guess = _blockname_from_tidy(path.name) or _blockname_from_iflip2(path.name)
         session_raw = session_from_tcspc_source(tcspc_source, blockname=bn_guess)
@@ -493,7 +493,7 @@ def sidebar() -> SidebarState:
     if LOGO_PATH.is_file():
         st.sidebar.image(str(LOGO_PATH), use_container_width=True)
     else:
-        st.sidebar.title("FLIPR analysis")
+        st.sidebar.title("iFLIP analysis")
     st.sidebar.caption("v0.0.1")
 
     empty_state = SidebarState(
@@ -555,7 +555,7 @@ def sidebar() -> SidebarState:
         return _load_custom_file(custom_path_str, empty_state)
 
     if not data_root_str:
-        st.sidebar.warning("Enter a FLIPR data root or load a file directly.")
+        st.sidebar.warning("Enter a iFLIP data root or load a file directly.")
         return empty_state
     data_root = Path(data_root_str).expanduser()
     if not data_root.is_dir():
@@ -1154,7 +1154,7 @@ def render_phasor(
     # from each frame before computing per-frame phasor coordinates.
     tcspc_for_phasor = tidy.tcspc.astype(np.float64)
     if background is not None:
-        from flipr.preprocess.background import subtract_background_per_frame
+        from iflip.preprocess.background import subtract_background_per_frame
 
         tcspc_for_phasor = subtract_background_per_frame(
             tcspc_for_phasor, background, scale=bg_scale
@@ -1537,7 +1537,7 @@ def render_sliding_tau(
 def main() -> None:
     state = sidebar()
     if state.session is None or state.session_raw is None:
-        st.info("Pick a FLIPR data root and session in the sidebar to begin.")
+        st.info("Pick a iFLIP data root and session in the sidebar to begin.")
         return
 
     session = state.session  # filtered (or raw if filter_mode == 'none')

@@ -27,8 +27,8 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 if TYPE_CHECKING:
-    from flipr.io.iflip2 import IFlip2File
-    from flipr.io.tidy_csv import TidyData
+    from iflip.io.iflip2 import IFlip2File
+    from iflip.io.tidy_csv import TidyData
 
 
 @dataclass
@@ -269,8 +269,8 @@ def discover_acquisitions(data_root: str | Path) -> list[AcquisitionEntry]:
         if e.has_session and (e.tidy_data_path is None or e.iflip2_path is None)
     ]
     if needs_backfill:
-        from flipr.io.iflip2 import list_iflip2_files, match_iflip2_to_session
-        from flipr.io.tidy_csv import list_tidy_files, match_tidy_to_session
+        from iflip.io.iflip2 import list_iflip2_files, match_iflip2_to_session
+        from iflip.io.tidy_csv import list_tidy_files, match_tidy_to_session
 
         tidy_files = list_tidy_files(data_root) if tidy_dir.is_dir() else []
         iflip2_files = list_iflip2_files(data_root) if raw_dir.is_dir() else []
@@ -303,8 +303,8 @@ def session_from_tcspc_source(
     Session Overview and Interval Inspector tabs work but Event PETH
     shows "no events".
     """
-    from flipr.io.iflip2 import IFlip2File
-    from flipr.io.tidy_csv import TidyData
+    from iflip.io.iflip2 import IFlip2File
+    from iflip.io.tidy_csv import TidyData
 
     streams = source.streams.copy()
     # Ensure canonical column order

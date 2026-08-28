@@ -18,8 +18,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from flipr.io import load_iflip2, load_tidy
-from flipr.io.iflip2 import FRAME_BYTES, N_BINS
+from iflip.io import load_iflip2, load_tidy
+from iflip.io.iflip2 import FRAME_BYTES, N_BINS
 
 # --------------------------------------------------------------------------- #
 # Path helpers

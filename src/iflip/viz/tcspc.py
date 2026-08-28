@@ -6,7 +6,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from flipr.preprocess.lifetime import DoubleExpFit, LifetimeFit, SingleExpFit
+from iflip.preprocess.lifetime import DoubleExpFit, LifetimeFit, SingleExpFit
 
 
 def tcspc_decay_figure(

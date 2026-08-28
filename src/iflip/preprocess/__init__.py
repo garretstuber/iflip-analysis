@@ -1,18 +1,18 @@
 """Preprocessing: lifetime re-fitting, phasor transforms, QC metrics."""
 
-from flipr.preprocess.background import (
+from iflip.preprocess.background import (
     BackgroundEstimate,
     compute_background,
     subtract_background,
     subtract_background_per_frame,
 )
-from flipr.preprocess.filters import (
+from iflip.preprocess.filters import (
     FILTER_MODES,
     FilterMode,
     apply_filter,
     filtered_session,
 )
-from flipr.preprocess.lifetime import (
+from iflip.preprocess.lifetime import (
     DoubleExpFit,
     LifetimeFit,
     SingleExpFit,
@@ -22,7 +22,7 @@ from flipr.preprocess.lifetime import (
     fit_single_exp,
     single_exp_model,
 )
-from flipr.preprocess.motion import (
+from iflip.preprocess.motion import (
     QCResult,
     compute_qc,
     detect_intensity_jumps,
@@ -30,7 +30,7 @@ from flipr.preprocess.motion import (
     detect_photon_starvation,
     rolling_corr,
 )
-from flipr.preprocess.phasor import (
+from iflip.preprocess.phasor import (
     PhasorResult,
     apparent_lifetimes,
     phasor_for_known_taus,
@@ -38,7 +38,7 @@ from flipr.preprocess.phasor import (
     phasor_series_from_tcspc,
     semicircle_points,
 )
-from flipr.preprocess.sliding_tau import (
+from iflip.preprocess.sliding_tau import (
     SLIDING_METHODS,
     SlidingMethod,
     SlidingTauResult,

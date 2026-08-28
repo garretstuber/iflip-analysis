@@ -1,27 +1,35 @@
 <p align="center">
-  <img src="src/flipr/app/assets/FLIPRlogo.png" alt="FLIPR logo" width="320"/>
+  <img src="src/iflip/app/assets/FLIPRlogo.png" alt="iFLIP analysis logo" width="320"/>
 </p>
 
-<h1 align="center">flipr-analysis</h1>
+<h1 align="center">iflip-analysis</h1>
 
 <p align="center">
-  Visualization and preprocessing tools for <b>Fluorescence Lifetime Fiber Photometry (FLIPR)</b> —
+  Visualization and preprocessing tools for <b>FLIM fiber-photometry data acquired with the iFLiP rig</b> —
   an interactive Streamlit dashboard, a library of reusable analysis modules,
-  and a byte-exact reader for the Mao/Zhong Lab raw acquisition format.
+  and a byte-exact reader for the Mao/Zhong Lab <code>.iFLiP2</code> acquisition format.
 </p>
+
+> **Note on the name.** This project was formerly called <code>flipr-analysis</code>.
+> It was renamed to <code>iflip-analysis</code> in mid-2026 because the acronym FLIPR is
+> already taken in this subfield — Lodder et al. 2025 (<em>Neuron</em>) published a
+> frequency-domain lifetime fiber photometry hardware system called FLIPR (there is
+> also the unrelated Molecular Devices FLIPR plate reader). This tool analyzes data
+> from the <strong>iFLiP</strong> time-domain rig (Zhong &amp; Mao labs, OHSU), so its name
+> now matches the rig it targets.
 
 ---
 
 ## Overview
 
-FLIPR records dopamine (and other) biosensor dynamics with a fiber-coupled TCSPC
-rig, producing not just intensity traces but a full photon-arrival-time
-histogram per frame at ~20 Hz. Because fluorescence lifetime is independent of total photon count, excitation power, or fiber-coupling
-efficiency, it provides a direct quantitative readout of sensor state
-that intensity alone cannot. This package turns that data into a tool
-researchers can actually drive: preprocess, inspect, event-align, and
-phasor-analyse sessions from a single Streamlit app, with all of the
-underlying analysis exposed as a clean Python library for scripted work.
+The iFLiP rig records dopamine (and other) biosensor dynamics with a fiber-coupled
+TCSPC system, producing not just intensity traces but a full photon-arrival-time
+histogram per frame at ~20 Hz. Because fluorescence lifetime is independent of total
+photon count, excitation power, or fiber-coupling efficiency, it provides a direct
+quantitative readout of sensor state that intensity alone cannot. This package turns
+that data into a tool researchers can actually drive: preprocess, inspect, event-align,
+and phasor-analyse sessions from a single Streamlit app, with all of the underlying
+analysis exposed as a clean Python library for scripted work.
 
 This project targets data acquired on a **TimeHarp 260 P** board driven by
 the lab's MATLAB acquisition software, with the **FLIM-DA0.5** dopamine
@@ -89,7 +97,7 @@ box. Different rig geometries just need a different period / bin axis.
 
 ### Streamlit dashboard
 
-The app runs as a four-tab Streamlit application you point at any FLIPR
+The app runs as a five-tab Streamlit application you point at any iFLIP
 data root.
 
 - **Session overview** — linked intensity and lifetime traces with event
@@ -120,7 +128,7 @@ data root.
 
 ## Data layout
 
-The app and library work with any FLIPR data root laid out like this.
+The app and library work with any iFLIP data root laid out like this.
 At minimum, you need one of `tidy/` or `raw/` (for per-frame TCSPC
 histograms) and a `sessions/<blockname>/` directory (for behavioural
 events and continuous streams).
@@ -170,7 +178,7 @@ Nothing in the loaders is hardcoded beyond the column schema.
 ### Requirements
 
 - **Python ≥ 3.12** (PhasorPy requires this)
-- A FLIPR data directory laid out as above
+- An iFLIP data directory laid out as above
 - macOS, Linux, or Windows (tested on macOS)
 
 ### Dependencies
@@ -199,8 +207,8 @@ Optional (dev) extras — `pip install -e ".[dev]"`:
 ### Setup with `uv` (recommended)
 
 ```bash
-git clone https://github.com/garretstuber/flipr-analysis.git
-cd flipr-analysis
+git clone https://github.com/garretstuber/iflip-analysis.git
+cd iflip-analysis
 uv venv --python 3.12
 uv pip install -e ".[dev]"
 ```
@@ -208,8 +216,8 @@ uv pip install -e ".[dev]"
 ### Setup with `pip` / `venv`
 
 ```bash
-git clone https://github.com/garretstuber/flipr-analysis.git
-cd flipr-analysis
+git clone https://github.com/garretstuber/iflip-analysis.git
+cd iflip-analysis
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
@@ -222,12 +230,12 @@ pip install -e ".[dev]"
 ### Run the dashboard
 
 ```bash
-uv run streamlit run src/flipr/app/streamlit_app.py
+uv run streamlit run src/iflip/app/streamlit_app.py
 # or, if .venv is activated:
-streamlit run src/flipr/app/streamlit_app.py
+streamlit run src/iflip/app/streamlit_app.py
 ```
 
-Point the **Data root** field at your FLIPR data directory, pick a session
+Point the **Data root** field at your iFLIP data directory, pick a session
 from the dropdown, and optionally switch between the raw `.iFLiP2` and
 tidy CSV sources.
 
@@ -235,9 +243,9 @@ tidy CSV sources.
 
 ```python
 from pathlib import Path
-from flipr.io import load_iflip2, load_session
-from flipr.align import build_peth
-from flipr.preprocess import filtered_session, compute_qc, fit_double_exp
+from iflip.io import load_iflip2, load_session
+from iflip.align import build_peth
+from iflip.preprocess import filtered_session, compute_qc, fit_double_exp
 
 data_root = Path("/path/to/FLIPR data")
 
@@ -272,7 +280,7 @@ print(f"mean response peak: {peth_bc.mean().max():+.4f} ns")
 ## Repository layout
 
 ```text
-src/flipr/
+src/iflip/
 ├── io/
 │   ├── iflip2.py        ← raw .iFLiP2 reader (byte-exact)
 │   ├── session_csv.py   ← sessions/<block>/ loader
@@ -358,7 +366,7 @@ uv run python scripts/iflip2_diagnose.py
 
 - **Yulong Li** — development of the FLIM-DA0.5 fluorescence lifetime
   dopamine biosensor.
-- **Tianyi Mao** and **Haining Zhong** — development of the FLIPR
+- **Tianyi Mao** and **Haining Zhong** — development of the iFLiP
   fiber photometry hardware and MATLAB acquisition software that
   produces the `.iFLiP2` files this package reads.
 - **Adam Gordon** and **Hallie Lazaro** — data collection.

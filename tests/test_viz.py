@@ -12,15 +12,15 @@ import numpy as np
 import plotly.graph_objects as go
 import pytest
 
-from flipr.align.peth import build_peth
-from flipr.io.session_csv import load_session
-from flipr.io.tidy_csv import list_tidy_files, load_tidy, match_tidy_to_session
-from flipr.preprocess.lifetime import fit_double_exp
-from flipr.preprocess.phasor import phasor_series_from_tcspc
-from flipr.viz.peth import peth_figure
-from flipr.viz.phasor import phasor_plot_figure
-from flipr.viz.tcspc import fit_params_table, tcspc_decay_figure
-from flipr.viz.traces import event_rate_histogram, session_traces_figure
+from iflip.align.peth import build_peth
+from iflip.io.session_csv import load_session
+from iflip.io.tidy_csv import list_tidy_files, load_tidy, match_tidy_to_session
+from iflip.preprocess.lifetime import fit_double_exp
+from iflip.preprocess.phasor import phasor_series_from_tcspc
+from iflip.viz.peth import peth_figure
+from iflip.viz.phasor import phasor_plot_figure
+from iflip.viz.tcspc import fit_params_table, tcspc_decay_figure
+from iflip.viz.traces import event_rate_histogram, session_traces_figure
 
 DATA_ROOT = Path(__file__).resolve().parents[2] / "FLIPR data"
 EXAMPLE_BLOCK = "2026_04_09_acz02"

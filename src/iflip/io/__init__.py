@@ -1,12 +1,12 @@
 """IO loaders for FLIPR data (tidy CSV exports + session CSV exports + raw .iFLiP2)."""
 
-from flipr.io.iflip2 import (
+from iflip.io.iflip2 import (
     IFlip2File,
     list_iflip2_files,
     load_iflip2,
     match_iflip2_to_session,
 )
-from flipr.io.session_csv import (
+from iflip.io.session_csv import (
     AcquisitionEntry,
     SessionData,
     discover_acquisitions,
@@ -14,7 +14,7 @@ from flipr.io.session_csv import (
     load_session,
     session_from_tcspc_source,
 )
-from flipr.io.tidy_csv import (
+from iflip.io.tidy_csv import (
     TidyData,
     list_tidy_files,
     load_tidy,

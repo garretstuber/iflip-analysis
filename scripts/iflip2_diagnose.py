@@ -2,7 +2,7 @@
 
 Loads the example raw acquisition + tidy CSV pair and prints a per-field
 parity report. Useful when iterating on the binary layout / lifetime
-formula in ``src/flipr/io/iflip2.py``.
+formula in ``src/iflip/io/iflip2.py``.
 
 Usage:
     .venv/bin/python scripts/iflip2_diagnose.py
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from flipr.io import load_iflip2, load_tidy
+from iflip.io import load_iflip2, load_tidy
 
 REPO = Path(__file__).resolve().parents[1]
 DATA_ROOT = REPO.parent / "FLIPR data"

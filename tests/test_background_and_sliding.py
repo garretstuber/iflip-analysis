@@ -5,13 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from flipr.preprocess.background import (
+from iflip.preprocess.background import (
     BackgroundEstimate,
     compute_background,
     subtract_background,
     subtract_background_per_frame,
 )
-from flipr.preprocess.sliding_tau import SLIDING_METHODS, sliding_tau
+from iflip.preprocess.sliding_tau import SLIDING_METHODS, sliding_tau
 
 # --------------------------------------------------------------------------- #
 # Synthetic data helpers

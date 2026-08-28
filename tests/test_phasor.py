@@ -1,4 +1,4 @@
-"""Tests for the PhasorPy wrapper in flipr.preprocess.phasor."""
+"""Tests for the PhasorPy wrapper in iflip.preprocess.phasor."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from flipr.io.tidy_csv import list_tidy_files, load_tidy, match_tidy_to_session
-from flipr.preprocess.phasor import (
+from iflip.io.tidy_csv import list_tidy_files, load_tidy, match_tidy_to_session
+from iflip.preprocess.phasor import (
     apparent_lifetimes,
     phasor_for_known_taus,
     phasor_from_histogram,

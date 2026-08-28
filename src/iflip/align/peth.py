@@ -26,7 +26,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-from flipr.io.session_csv import SessionData
+from iflip.io.session_csv import SessionData
 
 
 @dataclass(frozen=True)

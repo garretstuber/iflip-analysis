@@ -5,7 +5,7 @@ from __future__ import annotations
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from flipr.align.peth import PETH
+from iflip.align.peth import PETH
 
 
 def peth_figure(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import plotly.graph_objects as go
 
-from flipr.preprocess.phasor import phasor_for_known_taus, semicircle_points
+from iflip.preprocess.phasor import phasor_for_known_taus, semicircle_points
 
 
 def phasor_plot_figure(

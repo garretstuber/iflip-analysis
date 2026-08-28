@@ -7,9 +7,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from flipr.io.session_csv import load_session
-from flipr.io.tidy_csv import list_tidy_files, load_tidy, match_tidy_to_session
-from flipr.preprocess.lifetime import (
+from iflip.io.session_csv import load_session
+from iflip.io.tidy_csv import list_tidy_files, load_tidy, match_tidy_to_session
+from iflip.preprocess.lifetime import (
     DoubleExpFit,
     double_exp_model,
     fit_double_exp,

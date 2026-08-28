@@ -9,7 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from flipr.io.session_csv import SessionData
+from iflip.io.session_csv import SessionData
 
 # Fixed mapping from event type -> colour/label so colours stay stable
 # across re-renders.

@@ -8,9 +8,9 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from flipr.io.session_csv import SessionData
-from flipr.preprocess.sliding_tau import SlidingTauResult
-from flipr.viz.traces import EVENT_STYLES
+from iflip.io.session_csv import SessionData
+from iflip.preprocess.sliding_tau import SlidingTauResult
+from iflip.viz.traces import EVENT_STYLES
 
 
 def sliding_tau_figure(
@@ -24,7 +24,7 @@ def sliding_tau_figure(
     """Two-panel plot: sliding τ trace (top) + photons-per-window (bottom).
 
     Optionally overlays event markers from a session, similar to
-    :func:`flipr.viz.traces.session_traces_figure`.
+    :func:`iflip.viz.traces.session_traces_figure`.
     """
     rows = 2 if show_n_photons else 1
     row_heights = [0.7, 0.3] if show_n_photons else [1.0]

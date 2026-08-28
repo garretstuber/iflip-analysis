@@ -33,7 +33,7 @@ import numpy as np
 from scipy.ndimage import median_filter, uniform_filter1d
 from scipy.signal import savgol_filter
 
-from flipr.io.session_csv import SessionData
+from iflip.io.session_csv import SessionData
 
 FilterMode = Literal["none", "boxcar", "savgol", "median"]
 

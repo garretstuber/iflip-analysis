@@ -38,7 +38,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from flipr.io.session_csv import SessionData
+from iflip.io.session_csv import SessionData
 
 
 @dataclass

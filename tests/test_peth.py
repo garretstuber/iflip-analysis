@@ -1,4 +1,4 @@
-"""Tests for the PETH engine in flipr.align.peth."""
+"""Tests for the PETH engine in iflip.align.peth."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from flipr.align.peth import build_peth
-from flipr.io.session_csv import SessionData, load_session
+from iflip.align.peth import build_peth
+from iflip.io.session_csv import SessionData, load_session
 
 DATA_ROOT = Path(__file__).resolve().parents[2] / "FLIPR data"
 EXAMPLE_BLOCK = "2026_04_09_acz02"

@@ -138,14 +138,14 @@ class IFlip2File:
 
     @property
     def params(self) -> dict[str, Any]:
-        """Alias for ``header`` that matches :class:`flipr.io.tidy_csv.TidyData`'s
+        """Alias for ``header`` that matches :class:`iflip.io.tidy_csv.TidyData`'s
         attribute name, so either loader can be passed through the app
         interchangeably."""
         return self.header
 
     def time_index(self) -> np.ndarray:
         """Timepoint axis in seconds, mirroring
-        :meth:`flipr.io.tidy_csv.TidyData.time_index`."""
+        :meth:`iflip.io.tidy_csv.TidyData.time_index`."""
         return self.streams["time"].to_numpy()
 
     def integrate_histogram(self, start_time: float, stop_time: float) -> np.ndarray:
@@ -471,7 +471,7 @@ def list_iflip2_files(data_root: str | Path) -> list[Path]:
 def match_iflip2_to_session(files: list[Path], blockname: str) -> Path | None:
     """Pick the ``.iFLiP2`` file whose stem starts with ``<blockname>_``.
 
-    Mirrors :func:`flipr.io.tidy_csv.match_tidy_to_session`: blockname
+    Mirrors :func:`iflip.io.tidy_csv.match_tidy_to_session`: blockname
     ``2026_04_09_acz02`` matches ``2026_04_09_acz02_001.iFLiP2``. Returns
     the lexicographically earliest match or ``None``.
     """
