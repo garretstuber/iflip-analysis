@@ -295,8 +295,7 @@ src/iflip/
 │   └── phasor.py        ← phasor scatter + semicircle
 └── app/
     ├── streamlit_app.py ← the dashboard
-    ├── cli.py           ← console entry point
-    └── assets/          ← logo image
+    └── cli.py           ← console entry point
 
 tests/                   ← 73 tests (pytest)
 scripts/
