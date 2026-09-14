@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="src/iflip/app/assets/FLIPRlogo.png" alt="iFLIP analysis logo" width="320"/>
-</p>
-
 <h1 align="center">iflip-analysis</h1>
 
 <p align="center">
