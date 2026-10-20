@@ -1,5 +1,12 @@
 """IO loaders for FLIPR data (tidy CSV exports + session CSV exports + raw .iFLiP2)."""
 
+from iflip.io.arduino_lick import (
+    ArduinoLog,
+    ClockAlignment,
+    align_clocks,
+    build_session_folder,
+    load_arduino_log,
+)
 from iflip.io.iflip2 import (
     IFlip2File,
     list_iflip2_files,
@@ -23,13 +30,18 @@ from iflip.io.tidy_csv import (
 
 __all__ = [
     "AcquisitionEntry",
+    "ArduinoLog",
+    "ClockAlignment",
     "IFlip2File",
     "SessionData",
     "TidyData",
+    "align_clocks",
+    "build_session_folder",
     "discover_acquisitions",
     "list_iflip2_files",
     "list_sessions",
     "list_tidy_files",
+    "load_arduino_log",
     "load_iflip2",
     "load_session",
     "load_tidy",

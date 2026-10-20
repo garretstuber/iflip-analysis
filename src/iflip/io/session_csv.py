@@ -206,7 +206,9 @@ def discover_acquisitions(data_root: str | Path) -> list[AcquisitionEntry]:
     Scans ``sessions/``, ``tidy/``, and ``raw/`` and returns one
     :class:`AcquisitionEntry` per unique blockname, sorted alphabetically.
     An acquisition appears even if it only has a tidy CSV or a raw file
-    (no full session folder required).
+    (no full session folder required). Tidy and raw files sitting
+    directly in *data_root* (the flat layout the rig exports) are found
+    too; ``tidy/`` and ``raw/`` take precedence when both exist.
     """
     data_root = Path(data_root)
     entries: dict[str, AcquisitionEntry] = {}
@@ -224,13 +226,16 @@ def discover_acquisitions(data_root: str | Path) -> list[AcquisitionEntry]:
 
     # 2. Tidy data CSVs
     tidy_dir = data_root / "tidy"
-    if tidy_dir.is_dir():
-        for f in sorted(tidy_dir.glob("*_data.csv")):
+    for d in (tidy_dir, data_root):
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("*_data.csv")):
             bn = _blockname_from_tidy(f.name)
             if bn is None:
                 continue
             if bn in entries:
-                entries[bn].tidy_data_path = f
+                if entries[bn].tidy_data_path is None:
+                    entries[bn].tidy_data_path = f
             else:
                 entries[bn] = AcquisitionEntry(
                     blockname=bn,
@@ -242,16 +247,19 @@ def discover_acquisitions(data_root: str | Path) -> list[AcquisitionEntry]:
 
     # 3. Raw .iFLiP2 files
     raw_dir = data_root / "raw"
-    if raw_dir.is_dir():
+    for d in (raw_dir, data_root):
+        if not d.is_dir():
+            continue
         all_raw: set[Path] = set()
-        all_raw.update(raw_dir.glob("*.iFLiP2"))
-        all_raw.update(raw_dir.glob("*.iflip2"))
+        all_raw.update(d.glob("*.iFLiP2"))
+        all_raw.update(d.glob("*.iflip2"))
         for f in sorted(all_raw):
             bn = _blockname_from_iflip2(f.name)
             if bn is None:
                 continue
             if bn in entries:
-                entries[bn].iflip2_path = f
+                if entries[bn].iflip2_path is None:
+                    entries[bn].iflip2_path = f
             else:
                 entries[bn] = AcquisitionEntry(
                     blockname=bn,

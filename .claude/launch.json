@@ -2,11 +2,16 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "flipr-app",
-      "runtimeExecutable": ".venv/bin/streamlit",
+      "name": "iflip-app",
+      "runtimeExecutable": "uv",
       "runtimeArgs": [
         "run",
-        "src/flipr/app/streamlit_app.py",
+        "--offline",
+        "python",
+        "-m",
+        "streamlit",
+        "run",
+        "src/iflip/app/streamlit_app.py",
         "--server.headless=true",
         "--browser.gatherUsageStats=false"
       ],
