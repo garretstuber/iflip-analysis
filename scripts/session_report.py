@@ -167,7 +167,14 @@ def load(session_dir: Path) -> Data:
         ]
     )
 
-    log = load_arduino_log(session_dir.parent.parent / s.meta["arduino_log"])
+    root = session_dir.parent.parent
+    # flat export, or a raw/ tidy/ behavior_arduino/ layout
+    log_dirs = (root, root / "behavior_arduino")
+    log_path = next(
+        (p / s.meta["arduino_log"] for p in log_dirs if (p / s.meta["arduino_log"]).exists()),
+        root / s.meta["arduino_log"],
+    )
+    log = load_arduino_log(log_path)
     end_codes = log.records.loc[log.records.code == 0, "value"]
     arduino_end_s = (end_codes.iloc[-1] if len(end_codes) else log.records.value.iloc[-1]) / 1000
     offset, slope = float(s.meta["synch_offset"]), float(s.meta["sync_slope"])
@@ -352,6 +359,10 @@ def transient_analysis(d: Data) -> dict:
         )
     up, _ = find_peaks(x, height=TRANSIENT_K * sd, distance=dist)
     up = up[~d.reward_mask[up]]
+    # keep peaks whose whole triggered window lies inside the recording
+    up = up[
+        (up + int(PETH_WINDOW_S[0] * d.fs) >= 0) & (up + int(PETH_WINDOW_S[1] * d.fs) < d.t.size)
+    ]
     tp = d.t[up]
     lick_assoc = np.array(
         [np.any((d.licks > p + LICK_ASSOC_S[0]) & (d.licks < p + LICK_ASSOC_S[1])) for p in tp]
